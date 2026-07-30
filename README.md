@@ -92,6 +92,12 @@ appears when something starts running. The layout and the palette follow
 | `esc` | abort the work in progress |
 | `q` | quit |
 
+The mouse works throughout: a click ticks a task, a click on a group header
+ticks the whole group, the bottom buttons mirror the keys, and the wheel
+scrolls the panel under the pointer (over the tab bar it switches tabs). The
+terminal has to pass mouse events through; inside tmux that means
+`set -g mouse on`.
+
 Tasks are marked: a green `✓` (detected as already applied), an amber `●`
 (changes system behaviour), a red `▲` (can break the system or weaken its
 security).

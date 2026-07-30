@@ -255,8 +255,14 @@ class HelpScreen(ModalScreen[None]):
 [b]Selection[/]
   [$accent]e[/]               essentials set
   [$accent]g[/]               gaming set
-  [$accent]a[/]               select the whole group the cursor is in
+  [$accent]a[/]               select or clear the whole group the cursor is in
   [$accent]n[/]               deselect everything
+
+[b]Mouse[/]
+  A click ticks a task, a click on a group header ticks the whole group,
+  and the buttons at the bottom mirror the r, d, e and g keys. The wheel
+  scrolls the panel under the pointer; over the tab bar it switches tabs.
+  Inside tmux the mouse needs "set -g mouse on" in tmux.conf.
 
 [b]Running[/]
   [$accent]r[/]               show the plan and run

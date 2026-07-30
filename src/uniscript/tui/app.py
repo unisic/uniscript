@@ -12,6 +12,7 @@ from rich.text import Text
 from textual import events, on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.message import Message
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.markup import escape
 from textual.strip import Strip
@@ -62,8 +63,8 @@ DARK_THEME = Theme(
     success="#6eff72",
     foreground="#f7f7f7",
     background="#232629",
-    surface="#26292d",
-    panel="#2f373d",
+    surface="#2b3036",
+    panel="#333b43",
     dark=True,
     variables={
         "toggle-on": "#2e77ff",
@@ -117,6 +118,13 @@ class TaskList(SelectionList[str]):
     titles of the tasks aligned.
     """
 
+    class HeaderClicked(Message):
+        """A category header row was clicked with the mouse."""
+
+        def __init__(self, category: Category) -> None:
+            super().__init__()
+            self.category = category
+
     def render_line(self, y: int) -> Strip:
         _, scroll_y = self.scroll_offset
         try:
@@ -129,6 +137,35 @@ class TaskList(SelectionList[str]):
         segments = list(line)
         style = segments[0].style if segments else self.rich_style
         return Strip([Segment(" " * self._get_left_gutter_width(), style=style), *segments])
+
+    def _on_click(self, event: events.Click) -> None:
+        # OptionList drops clicks on disabled rows, but a click on a category
+        # header should act on the whole group, like the a key does. The message
+        # pump calls OptionList._on_click on its own for every click (private
+        # handlers run per class), so this must never call super() itself.
+        index = event.style.meta.get("option")
+        if index is None:
+            return
+        try:
+            value = str(self.get_option_at_index(index).value)
+        except OptionDoesNotExist:
+            return
+        category = Category.__members__.get(value.removeprefix(_HEADER_PREFIX))
+        if category is not None:
+            event.stop()
+            self.post_message(self.HeaderClicked(category))
+
+
+class TabsRow(Tabs):
+    """A tab bar that also answers to the mouse wheel."""
+
+    def _on_mouse_scroll_down(self, event: events.MouseScrollDown) -> None:
+        event.stop()
+        self.action_next_tab()
+
+    def _on_mouse_scroll_up(self, event: events.MouseScrollUp) -> None:
+        event.stop()
+        self.action_previous_tab()
 
 
 _LOG_STYLES = {
@@ -153,6 +190,7 @@ class UniscriptApp(App[None]):
 
     BINDINGS = [
         Binding("slash", "search", "Search"),
+        Binding("ctrl+f", "search", "Search", show=False),
         Binding("question_mark", "help", "Help"),
         Binding("q", "quit", "Quit"),
         # Run, dry run and the presets are buttons on the action bar, and the
@@ -210,7 +248,7 @@ class UniscriptApp(App[None]):
             yield Label("uniscript", id="brand")
             yield Input(placeholder="search the tasks  ( / )", id="search")
             yield Label("", id="match-count")
-        yield Tabs(
+        yield TabsRow(
             Tab("All", id="tab-ALL"),
             *(
                 Tab(_TAB_LABELS.get(category, category.label), id=f"tab-{category.name}")
@@ -246,7 +284,7 @@ class UniscriptApp(App[None]):
         tasks = self.query_one("#tasks", TaskList)
         tasks.border_title = "Tasks"
         # The keys that are not in the footer but are needed to pick anything.
-        tasks.border_subtitle = "space toggles, a takes the whole group"
+        tasks.border_subtitle = "space toggles a task, a toggles the group"
         detail = self.query_one("#detail", VerticalScroll)
         detail.border_title = "Description"
         detail.border_subtitle = (
@@ -260,7 +298,7 @@ class UniscriptApp(App[None]):
         log = self.query_one("#log", RichLog)
         log.border_title = "Log"
         log.can_focus = False
-        self.query_one("#tabs", Tabs).can_focus = False
+        self.query_one("#tabs", TabsRow).can_focus = False
         for button in self.query("#actionbar Button"):
             button.can_focus = False
         self.query_one("#progress", ProgressBar).display = False
@@ -465,7 +503,10 @@ class UniscriptApp(App[None]):
         dry = self.query_one("#act-dry", Button)
         dry.label = f"Dry run: {'on' if self.dry_run else 'OFF'} (d)"
         dry.set_class(not self.dry_run, "-live")
-        self.query_one("#act-run", Button).label = f"Run selected: {pending} (r)"
+        run = self.query_one("#act-run", Button)
+        run.label = f"▶ Run selected: {pending} (r)"
+        # Nothing selected means nothing to run; a lit green button would lie.
+        run.disabled = pending == 0 or self._busy
         self._refresh_match_count(len(self._visible_tasks()))
 
     def _log(self, level: str, message: str) -> None:
@@ -509,13 +550,18 @@ class UniscriptApp(App[None]):
         self._query = event.value.strip()
         # A search is global; a category tab would silently hide most matches.
         if self._query and self._active_category is not None:
-            self.query_one("#tabs", Tabs).active = "tab-ALL"
+            self.query_one("#tabs", TabsRow).active = "tab-ALL"
             return  # the tab handler refreshes the list
         self._refresh_task_list()
 
     @on(Input.Submitted, "#search")
     def _search_submitted(self) -> None:
         self.query_one("#tasks", TaskList).focus()
+
+    @on(TaskList.HeaderClicked)
+    def _header_clicked(self, event: TaskList.HeaderClicked) -> None:
+        if not self._busy:
+            self._toggle_group(event.category)
 
     @on(Button.Pressed, "#act-run")
     def _button_run(self) -> None:
@@ -541,6 +587,12 @@ class UniscriptApp(App[None]):
             event.stop()
             self.query_one("#tasks", TaskList).focus()
 
+    def on_click(self, event: events.Click) -> None:
+        # The system summary in the corner opens the same details as the s key.
+        widget = event.widget
+        if widget is not None and widget.id == "sysinfo":
+            self.action_show_system()
+
     def _task_by_id(self, task_id: str) -> Task | None:
         for task in self.tasks:
             if task.id == task_id:
@@ -558,6 +610,10 @@ class UniscriptApp(App[None]):
     def action_preset_recommended(self) -> None:
         ids = {task.id for task in self.tasks if task.default and not self._applied.get(task.id)}
         self._apply_preset(ids, "essentials")
+        self.notify(
+            f"Essentials: {len(ids)} tasks selected. Press r or click Run selected.",
+            timeout=4,
+        )
 
     def action_preset_gaming(self) -> None:
         ids = {
@@ -566,27 +622,38 @@ class UniscriptApp(App[None]):
             if (task.default or "gaming" in task.tags) and not self._applied.get(task.id)
         }
         self._apply_preset(ids, "gaming set")
+        self.notify(
+            f"Gaming set: {len(ids)} tasks selected. Press r or click Run selected.",
+            timeout=4,
+        )
 
-    def action_select_category(self) -> None:
-        category = self._category_of_highlight()
-        if category is None:
-            return
-        ids = set(self.selected)
-        ids |= {
+    def _toggle_group(self, category: Category) -> None:
+        """Select the whole group, or clear it when it is already selected."""
+        ids = {
             task.id
             for task in self._visible_tasks()
             if task.category is category and not self._applied.get(task.id)
         }
-        self._apply_preset(ids, f"whole group: {category.label}")
+        if not ids:
+            return
+        if ids <= self.selected:
+            self._apply_preset(self.selected - ids, f"group cleared: {category.label}")
+        else:
+            self._apply_preset(self.selected | ids, f"whole group: {category.label}")
+
+    def action_select_category(self) -> None:
+        category = self._category_of_highlight()
+        if category is not None:
+            self._toggle_group(category)
 
     def action_search(self) -> None:
         self.query_one("#search", Input).focus()
 
     def action_prev_tab(self) -> None:
-        self.query_one("#tabs", Tabs).action_previous_tab()
+        self.query_one("#tabs", TabsRow).action_previous_tab()
 
     def action_next_tab(self) -> None:
-        self.query_one("#tabs", Tabs).action_next_tab()
+        self.query_one("#tabs", TabsRow).action_next_tab()
 
     def action_clear_selection(self) -> None:
         self._apply_preset(set(), "selection cleared")
@@ -796,7 +863,7 @@ class UniscriptApp(App[None]):
     def _set_controls_enabled(self, enabled: bool) -> None:
         self.query_one("#tasks", TaskList).disabled = not enabled
         self.query_one("#search", Input).disabled = not enabled
-        self.query_one("#tabs", Tabs).disabled = not enabled
+        self.query_one("#tabs", TabsRow).disabled = not enabled
         for button in self.query("#actionbar Button"):
             button.disabled = not enabled
 

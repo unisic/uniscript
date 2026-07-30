@@ -84,13 +84,17 @@ Screen {
     width: 2fr;
     min-width: 28;
     overflow-x: hidden;
-    padding: 0 2;
+    padding: 1 2;
     scrollbar-size-vertical: 1;
 }
 
 /* Widoczne puste pudelko to "niezaznaczone", niebieski X w kolorze wlacznika
    WinUtila to "zaznaczone". Tlo pudelka jest zawsze takie samo, zeby ruch
    kursora nie wygladal jak zmiana stanu. */
+
+#tasks > .option-list--option-hover {
+    background: $btn-hover 50%;
+}
 
 #tasks > .selection-list--button,
 #tasks > .selection-list--button-highlighted {
@@ -104,17 +108,20 @@ Screen {
     background: $panel-lighten-1;
 }
 
-/* Pasek akcji na dole, odpowiednik przyciskow WinUtila. */
+/* Pasek akcji na dole, odpowiednik przyciskow WinUtila. Pelna wysokosc
+   przycisku, zeby uruchomienie bylo widoczne od progu. */
 
 #actionbar {
-    height: 1;
+    height: 3;
     background: $panel;
     padding: 0 1;
 }
 
 #actionbar Button {
     width: auto;
+    height: 100%;
     margin: 0 1 0 0;
+    padding: 0 2;
     border: none;
     background: $btn-bg;
     color: $foreground;
@@ -124,15 +131,24 @@ Screen {
     background: $btn-hover;
 }
 
-/* Glowna akcja w kolorze zaznaczonego przycisku WinUtila. */
+/* Glowna akcja: zielona, gasnie kiedy nie ma nic do uruchomienia. */
 
 #actionbar #act-run {
-    background: $primary;
+    background: $success;
+    color: auto 90%;
     text-style: bold;
+    padding: 0 3;
 }
 
 #actionbar #act-run:hover {
-    background: $secondary;
+    background: $success 80%;
+}
+
+/* Zgaszony, dopoki nie ma czego uruchomic; zapala sie z pierwszym zaznaczeniem. */
+
+#actionbar #act-run:disabled {
+    background: $btn-bg;
+    color: $text-muted;
 }
 
 #actionbar #act-dry.-live {
@@ -147,6 +163,10 @@ Screen {
     color: $text-muted;
     text-wrap: nowrap;
     text-overflow: ellipsis;
+}
+
+#sysinfo:hover {
+    color: $text;
 }
 
 /* Konsola: ukryta do pierwszego uruchomienia. */
