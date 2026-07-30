@@ -247,7 +247,7 @@ class HelpScreen(ModalScreen[None]):
   [$accent]arrows[/]          move through the list
   [$accent]space[/]           select or deselect a task
   [$accent]/[/]               filter the list, escape clears it
-  [$accent]tab[/]             next panel
+  [$accent]shift+arrows[/]    scroll the description (the wheel works too)
   [$accent]s[/]               details of the detected system
   [$accent]t[/]               switch between the dark and the light palette
 

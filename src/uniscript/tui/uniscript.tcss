@@ -60,19 +60,20 @@ Screen {
     border-subtitle-color: $text-muted;
 }
 
-/* Pusta ramka to "niezaznaczone", zielony X to "zaznaczone". Tlo pudelka jest
-   zawsze takie samo, zeby ruch kursora nie wygladal jak zmiana stanu. */
+/* Widoczne puste pudelko to "niezaznaczone", zielony X to "zaznaczone". Tlo
+   pudelka jest zawsze takie samo, zeby ruch kursora nie wygladal jak zmiana
+   stanu, a kolor X w stanie pustym zlewa sie z tlem pudelka. */
 
 #tasks > .selection-list--button,
 #tasks > .selection-list--button-highlighted {
-    color: $panel;
-    background: $panel;
+    color: $panel-lighten-1;
+    background: $panel-lighten-1;
 }
 
 #tasks > .selection-list--button-selected,
 #tasks > .selection-list--button-selected-highlighted {
     color: $text-success;
-    background: $panel;
+    background: $panel-lighten-1;
 }
 
 #detail {

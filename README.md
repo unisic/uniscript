@@ -74,6 +74,7 @@ below it, and a log that appears when something starts running.
 | arrows | move through the list |
 | space | select or deselect a task |
 | `/` | filter the list, `esc` clears the filter |
+| shift+arrows | scroll the description (the wheel works too) |
 | `e` | the essentials set |
 | `g` | the gaming set |
 | `a` | select the whole group the cursor is in |

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from rich.segment import Segment
 from rich.text import Text
-from textual import on, work
+from textual import events, on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -135,6 +135,8 @@ class UniscriptApp(App[None]):
         Binding("d", "toggle_dry_run", "Dry run", show=False),
         Binding("s", "show_system", "System", show=False),
         Binding("t", "switch_palette", "Light or dark palette", show=False),
+        Binding("shift+down", "scroll_detail(1)", "Scroll the description", show=False),
+        Binding("shift+up", "scroll_detail(-1)", "Scroll the description", show=False),
         Binding("l", "toggle_console", "Log panel", show=False),
         Binding("c", "clear_log", "Clear log", show=False),
         Binding("escape", "abort", "Abort", show=False),
@@ -208,8 +210,15 @@ class UniscriptApp(App[None]):
         tasks.border_title = "Tasks"
         # The keys that are not in the footer but are needed to pick anything.
         tasks.border_subtitle = "space toggles, a takes the whole group"
-        self.query_one("#detail", VerticalScroll).border_title = "Description"
-        self.query_one("#log", RichLog).border_title = "Log"
+        detail = self.query_one("#detail", VerticalScroll)
+        detail.border_title = "Description"
+        # A click on the description or the log must not steal the keyboard from
+        # the list: arrows would silently scroll the panel and look dead. The
+        # wheel still scrolls both, shift+arrows scroll the description.
+        detail.can_focus = False
+        log = self.query_one("#log", RichLog)
+        log.border_title = "Log"
+        log.can_focus = False
         self.query_one("#progress", ProgressBar).display = False
         # The log only earns its screen space once something is actually running.
         self.query_one("#console", Vertical).display = False
@@ -440,6 +449,14 @@ class UniscriptApp(App[None]):
     def _search_submitted(self) -> None:
         self.query_one("#tasks", TaskList).focus()
 
+    def on_key(self, event: events.Key) -> None:
+        # Arrows in the filter field jump to the list, so typing a filter and
+        # moving through the matches is one motion without enter in between.
+        search = self.query_one("#search", Input)
+        if search.has_focus and event.key in ("down", "up"):
+            event.stop()
+            self.query_one("#tasks", TaskList).focus()
+
     def _task_by_id(self, task_id: str) -> Task | None:
         for task in self.tasks:
             if task.id == task_id:
@@ -498,6 +515,13 @@ class UniscriptApp(App[None]):
 
     def action_clear_log(self) -> None:
         self.query_one("#log", RichLog).clear()
+
+    def action_scroll_detail(self, direction: int) -> None:
+        detail = self.query_one("#detail", VerticalScroll)
+        if direction > 0:
+            detail.scroll_down()
+        else:
+            detail.scroll_up()
 
     def action_switch_palette(self) -> None:
         # Textual cannot ask the terminal for its background colour, so the
