@@ -70,7 +70,68 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="skip the confirmation prompt for --run",
     )
+    parser.add_argument(
+        "--input-probe",
+        action="store_true",
+        help="show the raw key and mouse events this terminal delivers, then exit",
+    )
     return parser
+
+
+def _input_probe() -> int:
+    """Print every byte the terminal sends, with mouse reporting switched on.
+
+    The interface cannot see events the terminal never delivers. This shows
+    which side is broken: if moving and clicking the mouse prints nothing
+    here, the terminal (or tmux, screen, an IDE panel) is not passing the
+    mouse through, and no change in uniscript can fix that.
+    """
+    import select
+    import termios
+    import tty
+
+    fd = sys.stdin.fileno()
+    if not os.isatty(fd):
+        print("stdin is not a terminal", file=sys.stderr)
+        return 1
+    print("Move the mouse, click and scroll inside this window.")
+    print("Mouse events look like \\x1b[<0;12;5M. Press q to finish.\n")
+    old = termios.tcgetattr(fd)
+    # Click, any-motion and SGR extended reporting, the same set Textual asks for.
+    sys.stdout.write("\x1b[?1000h\x1b[?1003h\x1b[?1006h")
+    sys.stdout.flush()
+    mouse_events = 0
+    keys = 0
+    try:
+        tty.setcbreak(fd)
+        while True:
+            ready, _, _ = select.select([fd], [], [], 30.0)
+            if not ready:
+                break
+            data = os.read(fd, 1024)
+            if not data:
+                break
+            if b"q" in data and b"\x1b[<" not in data:
+                break
+            shown = repr(data)[2:-1]
+            if data.startswith(b"\x1b[<"):
+                mouse_events += data.count(b"\x1b[<")
+                print(f"mouse: {shown}\r")
+            else:
+                keys += 1
+                print(f"key:   {shown}\r")
+    finally:
+        sys.stdout.write("\x1b[?1003l\x1b[?1000l\x1b[?1006l")
+        sys.stdout.flush()
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+    print(f"\nmouse events: {mouse_events}, key presses: {keys}")
+    if mouse_events == 0:
+        print("No mouse events arrived. This terminal is not passing the mouse")
+        print("through (tmux needs 'set -g mouse on'; IDE and web terminals")
+        print("often do not forward the mouse at all). Try a plain terminal.")
+    else:
+        print("The mouse reaches the application, so uniscript will see it too.")
+    return 0
 
 
 def _select(tasks: list[Task], spec: str) -> tuple[list[Task], list[str]]:
@@ -209,6 +270,9 @@ async def _run_headless(
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+
+    if args.input_probe:
+        return _input_probe()
 
     system = detect_system()
     probe = Probe(system)

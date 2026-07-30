@@ -96,7 +96,10 @@ The mouse works throughout: a click ticks a task, a click on a group header
 ticks the whole group, the bottom buttons mirror the keys, and the wheel
 scrolls the panel under the pointer (over the tab bar it switches tabs). The
 terminal has to pass mouse events through; inside tmux that means
-`set -g mouse on`.
+`set -g mouse on`, and terminals embedded in IDEs or chat tools often do not
+forward the mouse at all. When in doubt run `./uniscript --input-probe`: it
+prints every event the terminal actually delivers, so it shows in seconds
+whether the mouse ever reaches the application.
 
 Tasks are marked: a green `✓` (detected as already applied), an amber `●`
 (changes system behaviour), a red `▲` (can break the system or weaken its
