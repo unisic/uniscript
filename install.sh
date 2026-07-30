@@ -57,8 +57,9 @@ fi
 [ -x "$TARGET/uniscript" ] || die "$TARGET/uniscript is missing"
 
 # With "curl | bash" standard input is taken by the pipe, and the interface needs
-# a terminal. Attach /dev/tty when it is available.
-if [ ! -t 0 ] && [ -e /dev/tty ]; then
+# a terminal. Attach /dev/tty when it can actually be opened: the file exists even
+# in a session with no controlling terminal, where opening it fails.
+if [ ! -t 0 ] && (exec </dev/tty) 2>/dev/null; then
     exec "$TARGET/uniscript" "$@" </dev/tty
 fi
 
