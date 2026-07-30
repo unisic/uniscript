@@ -210,6 +210,12 @@ Honestly, because it matters for a script that touches system configuration:
   section (the switch to a shell that is not installed, the switch to the shell
   that is already the login one, and adding the starship line to the startup
   file against a test HOME, followed by restoring it).
+- **The installer: run end to end** against a local `file://` clone. The first
+  run cloned the repository, created the environment and installed Textual, the
+  second one fast-forwarded the clone and reused the environment. The four guards
+  (a target that is not a repository, a target pointing at a different
+  repository, a run through `sudo`, a branch that does not exist) were triggered
+  on purpose and each one stopped with its own message.
 - **Debian, Ubuntu, Arch, openSUSE: written, not run.** I did not have those
   systems at hand. The package names and the commands come from the
   documentation of each distribution, but no path there has been executed. Start

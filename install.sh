@@ -51,7 +51,7 @@ if [ -e "$TARGET" ]; then
 else
     info "cloning into $TARGET"
     git clone --quiet --branch "$BRANCH" --depth 1 "$REPO" "$TARGET" ||
-        die "the clone failed, check the repository address and your network connection"
+        die "the clone failed, check the repository address, the branch and your network connection"
 fi
 
 [ -x "$TARGET/uniscript" ] || die "$TARGET/uniscript is missing"
