@@ -266,9 +266,9 @@ class HelpScreen(ModalScreen[None]):
   [$accent]q[/]               quit
 
 [b]Task markers[/]
-  [$success]done[/]            detected as already applied
-  [$warning]care[/]            changes system behaviour, read the description
-  [$error]risk[/]            can break the system or weaken its security
+  [$success]✓[/]               detected as already applied
+  [$warning]●[/]               changes system behaviour, read the description
+  [$error]▲[/]               can break the system or weaken its security
 
 [b]Safety[/]
   Every configuration file change is copied to a backup first, under

@@ -92,8 +92,9 @@ appears when something starts running. The layout and the palette follow
 | `esc` | abort the work in progress |
 | `q` | quit |
 
-Tasks are marked: `done` (detected as already applied), `care` (changes system
-behaviour), `risk` (can break the system or weaken its security).
+Tasks are marked: a green `✓` (detected as already applied), an amber `●`
+(changes system behaviour), a red `▲` (can break the system or weaken its
+security).
 
 ## Without the interface
 

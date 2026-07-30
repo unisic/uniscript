@@ -249,6 +249,9 @@ class UniscriptApp(App[None]):
         tasks.border_subtitle = "space toggles, a takes the whole group"
         detail = self.query_one("#detail", VerticalScroll)
         detail.border_title = "Description"
+        detail.border_subtitle = (
+            "[$text-warning]●[/] care  [$text-error]▲[/] risk  [$text-success]✓[/] done"
+        )
         # A click on the description, the log, the tabs or a button must not
         # steal the keyboard from the list: arrows always drive the list,
         # left and right switch tabs, the wheel scrolls what it hovers over
@@ -323,19 +326,21 @@ class UniscriptApp(App[None]):
         return task.category if task else None
 
     def _task_prompt(self, task: Task) -> str:
+        # One-character flags keep the titles in a straight column; the legend
+        # sits under the description panel and in the help.
         applied = self._applied.get(task.id)
         if applied:
-            marker = "[$text-success]done[/]"
+            marker = "[$text-success]✓[/]"
         elif task.risk is Risk.HIGH:
-            marker = "[$text-error]risk[/]"
+            marker = "[$text-error]▲[/]"
         elif task.risk is Risk.MEDIUM:
-            marker = "[$text-warning]care[/]"
+            marker = "[$text-warning]●[/]"
         else:
-            marker = "    "
+            marker = " "
         title = escape(task.title)
         if applied:
             title = f"[$text-muted]{title}[/]"
-        return f"{marker}  {title}"
+        return f"{marker} {title}"
 
     def _refresh_task_list(self) -> None:
         widget = self.query_one("#tasks", TaskList)
@@ -344,6 +349,9 @@ class UniscriptApp(App[None]):
         rows: list[Task | None] = []
         entries: list[Selection[str]] = []
         current: Category | None = None
+        counts: dict[Category, int] = {}
+        for task in visible:
+            counts[task.category] = counts.get(task.category, 0) + 1
         for task in visible:
             # On a category tab the tab itself is the header.
             if self._active_category is None and task.category is not current:
@@ -357,7 +365,8 @@ class UniscriptApp(App[None]):
                 current = task.category
                 entries.append(
                     Selection(
-                        f"[b $text-accent]{escape(current.label.upper())}[/]",
+                        f"[b $text-accent]{escape(current.label.upper())}[/]"
+                        f"  [$text-muted]{counts[current]}[/]",
                         f"{_HEADER_PREFIX}{current.name}",
                         False,
                         disabled=True,

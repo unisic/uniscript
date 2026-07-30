@@ -58,7 +58,14 @@ Screen {
     border: round $panel-lighten-1;
     border-title-color: $text-accent;
     border-title-style: bold;
+    border-subtitle-color: $text-muted;
     background: $surface;
+    scrollbar-background: $surface;
+    scrollbar-background-hover: $surface;
+    scrollbar-background-active: $surface;
+    scrollbar-color: $panel-lighten-2;
+    scrollbar-color-hover: $btn-hover;
+    scrollbar-color-active: $primary;
 }
 
 #tasks:focus, #detail:focus {
@@ -71,7 +78,6 @@ Screen {
     height: 100%;
     padding: 0 1;
     scrollbar-size-vertical: 1;
-    border-subtitle-color: $text-muted;
 }
 
 #detail {
@@ -118,8 +124,15 @@ Screen {
     background: $btn-hover;
 }
 
+/* Glowna akcja w kolorze zaznaczonego przycisku WinUtila. */
+
 #actionbar #act-run {
+    background: $primary;
     text-style: bold;
+}
+
+#actionbar #act-run:hover {
+    background: $secondary;
 }
 
 #actionbar #act-dry.-live {
@@ -171,6 +184,10 @@ Screen {
     padding: 0 1;
     overflow-x: hidden;
     scrollbar-size-vertical: 1;
+    scrollbar-background: $surface;
+    scrollbar-color: $panel-lighten-2;
+    scrollbar-color-hover: $btn-hover;
+    scrollbar-color-active: $primary;
 }
 
 /* Okna modalne */
