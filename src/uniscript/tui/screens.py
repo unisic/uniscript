@@ -245,19 +245,22 @@ class HelpScreen(ModalScreen[None]):
 
     HELP = """[b]Navigation[/]
   [$accent]arrows[/]          move through the list
-  [$accent]tab[/]             next panel
   [$accent]space[/]           select or deselect a task
+  [$accent]/[/]               filter the list, escape clears it
+  [$accent]tab[/]             next panel
   [$accent]s[/]               details of the detected system
+  [$accent]t[/]               switch between the dark and the light palette
 
 [b]Selection[/]
   [$accent]e[/]               essentials set
   [$accent]g[/]               gaming set
-  [$accent]a[/]               select everything in the category
+  [$accent]a[/]               select the whole group the cursor is in
   [$accent]n[/]               deselect everything
 
 [b]Running[/]
   [$accent]r[/]               show the plan and run
   [$accent]d[/]               toggle dry run
+  [$accent]l[/]               show or hide the log
   [$accent]c[/]               clear the log
   [$accent]q[/]               quit
 

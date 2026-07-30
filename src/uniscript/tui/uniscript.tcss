@@ -1,108 +1,92 @@
+/* Palety siedza w app.py (DARK_THEME, LIGHT_THEME). Tutaj tylko uklad i ramki,
+   wszystkie kolory przez zmienne motywu, zeby dzialalo na jasnym tle tak samo. */
+
 Screen {
     background: $background;
 }
 
-#body {
+#workspace {
     height: 1fr;
 }
 
-#sidebar {
-    width: 38;
-    background: $surface;
-    border-right: vkey $primary 30%;
-}
+/* Pasek filtra: jedna linia nad lista, bez wlasnej ramki, zeby nie mnozyc
+   obwodek nad ramka listy. */
 
-#facts {
-    height: auto;
-    padding: 1 2;
+#filterbar {
+    height: 1;
     background: $panel;
-    text-wrap: nowrap;
-    text-overflow: ellipsis;
+    padding: 0 2;
 }
 
-#categories {
-    height: 1fr;
-    min-height: 11;
+#search {
+    width: 1fr;
+    height: 1;
+    padding: 0;
+    border: none;
     background: transparent;
-    border-top: hkey $primary 30%;
-    padding: 0 1;
+    color: $foreground;
 }
 
-#categories > ListItem {
-    padding: 0 1;
+#search:focus {
     background: transparent;
-}
-
-#categories > ListItem.--highlight {
-    background: $primary 25%;
-    color: $text;
+    color: $foreground;
     text-style: bold;
 }
 
-#actions {
-    height: auto;
-    padding: 1 2;
-    border-top: hkey $primary 30%;
-}
-
-#actions Button {
-    width: 100%;
-    height: 1;
-    content-align: left middle;
-    text-align: left;
+#match-count {
+    width: auto;
+    padding-left: 2;
     color: $text-muted;
 }
 
-#actions Button:hover {
-    color: $text;
-    background: $primary 25%;
+/* Panele: ta sama ramka, ta sama reakcja na fokus. */
+
+#tasks, #detail {
+    border: round $primary 40%;
+    border-title-color: $text-primary;
+    border-title-style: bold;
+    background: $surface;
 }
 
-#actions Button:focus {
-    color: $text;
-    text-style: bold;
-}
-
-#actions #btn-run {
-    color: $text-success;
-    text-style: bold;
-}
-
-#workspace {
-    width: 1fr;
+#tasks:focus, #detail:focus {
+    border: round $accent;
 }
 
 #tasks {
     height: 3fr;
-    border: round $primary 40%;
-    border-title-color: $text-primary;
-    border-title-style: bold;
+    min-height: 8;
     padding: 0 1;
-    background: $surface;
+    scrollbar-size-vertical: 1;
+    border-subtitle-color: $text-muted;
 }
 
-#tasks:focus {
-    border: round $accent;
+/* Pusta ramka to "niezaznaczone", zielony X to "zaznaczone". Tlo pudelka jest
+   zawsze takie samo, zeby ruch kursora nie wygladal jak zmiana stanu. */
+
+#tasks > .selection-list--button,
+#tasks > .selection-list--button-highlighted {
+    color: $panel;
+    background: $panel;
+}
+
+#tasks > .selection-list--button-selected,
+#tasks > .selection-list--button-selected-highlighted {
+    color: $text-success;
+    background: $panel;
 }
 
 #detail {
     height: 2fr;
     min-height: 8;
     overflow-x: hidden;
-    border: round $primary 40%;
-    border-title-color: $text-primary;
-    border-title-style: bold;
     padding: 0 2;
-    background: $surface;
+    scrollbar-size-vertical: 1;
 }
 
-#detail:focus {
-    border: round $accent;
-}
+/* Konsola: ukryta do pierwszego uruchomienia, wiec ma wlasny naglowek statusu. */
 
 #console {
     height: 14;
-    border-top: hkey $primary 30%;
 }
 
 #statusbar {
@@ -127,8 +111,11 @@ Screen {
 
 #log {
     height: 1fr;
+    border: round $primary 40%;
+    border-title-color: $text-primary;
+    border-title-style: bold;
     background: $surface;
-    padding: 0 2;
+    padding: 0 1;
     overflow-x: hidden;
     scrollbar-size-vertical: 1;
 }
@@ -180,7 +167,7 @@ PlanScreen, PromptScreen, SummaryScreen, SystemScreen, HelpScreen {
 
 #plan-body, #summary-body, #system-body, #help-body {
     height: 1fr;
-    border: round $primary 30%;
+    border: round $primary 40%;
     padding: 0 1;
     margin-bottom: 1;
 }

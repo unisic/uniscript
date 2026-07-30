@@ -7,6 +7,7 @@ import shlex
 import subprocess
 from pathlib import Path
 
+from rich.segment import Segment
 from rich.text import Text
 from textual import on, work
 from textual.app import App, ComposeResult
@@ -14,18 +15,20 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.content import Content
 from textual.markup import escape
+from textual.strip import Strip
+from textual.theme import Theme
 from textual.widgets import (
-    Button,
     Footer,
     Header,
+    Input,
     Label,
-    ListItem,
-    ListView,
+    OptionList,
     ProgressBar,
     RichLog,
     SelectionList,
     Static,
 )
+from textual.widgets.option_list import OptionDoesNotExist
 from textual.widgets.selection_list import Selection
 
 from ..catalog import build_tasks, categories_of
@@ -39,6 +42,65 @@ from ..core.tasks import Category, Risk, Task
 from .screens import HelpScreen, PlanScreen, PromptScreen, SummaryScreen, SystemScreen
 
 LOG_MAX_LINES = 2000
+
+# The value of a list entry that is a category header rather than a task.
+_HEADER_PREFIX = "\x00header:"
+
+# One palette, so a colour always means the same thing: green is done, amber is
+# "changes system behaviour", red is "can break the system".
+DARK_THEME = Theme(
+    name="uniscript-dark",
+    primary="#5a9fd4",
+    secondary="#5fb3a1",
+    accent="#7aa2f7",
+    warning="#d9a441",
+    error="#d96666",
+    success="#7fb069",
+    foreground="#c9ced8",
+    background="#15181e",
+    surface="#1c2028",
+    panel="#242935",
+    dark=True,
+)
+
+LIGHT_THEME = Theme(
+    name="uniscript-light",
+    primary="#2f6ea5",
+    secondary="#2f7d6c",
+    accent="#3b5fa8",
+    warning="#9a6a12",
+    error="#a83232",
+    success="#3f7a2e",
+    foreground="#1f2328",
+    background="#fbfbfa",
+    surface="#f2f2f0",
+    panel="#e6e6e3",
+    dark=False,
+)
+
+
+class TaskList(SelectionList[str]):
+    """A selection list where category headers are rows without a checkbox.
+
+    SelectionList draws a toggle button in front of every entry, including the
+    disabled ones, so an unmodified header would read as an unticked task. Here
+    the button is replaced by blank space of the same width, which keeps the
+    titles of the tasks aligned.
+    """
+
+    def render_line(self, y: int) -> Strip:
+        _, scroll_y = self.scroll_offset
+        try:
+            option = self.get_option_at_index(scroll_y + y)
+        except OptionDoesNotExist:
+            return super().render_line(y)
+        if not str(option.value).startswith(_HEADER_PREFIX):
+            return super().render_line(y)
+        line = OptionList.render_line(self, y)
+        segments = list(line)
+        style = segments[0].style if segments else self.rich_style
+        return Strip([Segment(" " * self._get_left_gutter_width(), style=style), *segments])
+
 
 _LOG_STYLES = {
     "cmd": "bold cyan",
@@ -61,18 +123,21 @@ class UniscriptApp(App[None]):
     TITLE = "uniscript"
 
     BINDINGS = [
+        Binding("slash", "search", "Search"),
         Binding("r", "start", "Run"),
         Binding("e", "preset_recommended", "Essentials"),
         Binding("g", "preset_gaming", "Gaming"),
-        Binding("a", "select_category", "Whole category"),
-        Binding("n", "clear_selection", "Deselect"),
-        Binding("d", "toggle_dry_run", "Dry run"),
-        Binding("s", "show_system", "System"),
-        Binding("c", "clear_log", "Clear log", show=False),
-        Binding("l", "toggle_console", "Log panel", show=False),
         Binding("question_mark", "help", "Help"),
-        Binding("escape", "abort", "Abort", show=False),
         Binding("q", "quit", "Quit"),
+        # The rest stay off the footer, which only has room for a handful.
+        Binding("a", "select_category", "Select the whole group", show=False),
+        Binding("n", "clear_selection", "Deselect everything", show=False),
+        Binding("d", "toggle_dry_run", "Dry run", show=False),
+        Binding("s", "show_system", "System", show=False),
+        Binding("t", "switch_palette", "Light or dark palette", show=False),
+        Binding("l", "toggle_console", "Log panel", show=False),
+        Binding("c", "clear_log", "Clear log", show=False),
+        Binding("escape", "abort", "Abort", show=False),
     ]
 
     def __init__(
@@ -93,7 +158,7 @@ class UniscriptApp(App[None]):
         self.categories: list[Category] = categories_of(self.tasks)
         self.selected: set[str] = set()
         self._applied: dict[str, bool | None] = {}
-        self._current_category: Category | None = self.categories[0] if self.categories else None
+        self._query = ""
         self._syncing = False
         self._busy = False
         self.sub_title = self._subtitle()
@@ -114,25 +179,13 @@ class UniscriptApp(App[None]):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        with Horizontal(id="body"):
-            with Vertical(id="sidebar"):
-                yield Static(self._facts_text(), id="facts")
-                yield ListView(
-                    *[
-                        ListItem(Label(category.label), id=f"cat-{category.name}")
-                        for category in self.categories
-                    ],
-                    id="categories",
-                )
-                with Vertical(id="actions"):
-                    yield Button("Essentials", compact=True, id="btn-recommended")
-                    yield Button("Gaming setup", compact=True, id="btn-gaming")
-                    yield Button("Deselect all", compact=True, id="btn-clear")
-                    yield Button("Run selected", compact=True, id="btn-run")
-            with Vertical(id="workspace"):
-                yield SelectionList[str](id="tasks")
-                with VerticalScroll(id="detail"):
-                    yield Static("", id="detail-content")
+        with Vertical(id="workspace"):
+            with Horizontal(id="filterbar"):
+                yield Input(placeholder="press / to filter the tasks", id="search")
+                yield Label("", id="match-count")
+            yield TaskList(id="tasks")
+            with VerticalScroll(id="detail"):
+                yield Static("", id="detail-content")
         with Vertical(id="console"):
             with Horizontal(id="statusbar"):
                 yield Label("", id="status-mode")
@@ -148,11 +201,19 @@ class UniscriptApp(App[None]):
         yield Footer()
 
     def on_mount(self) -> None:
-        self.query_one("#tasks", SelectionList).border_title = "Tasks"
+        self.register_theme(DARK_THEME)
+        self.register_theme(LIGHT_THEME)
+        self.theme = "uniscript-dark"
+        tasks = self.query_one("#tasks", TaskList)
+        tasks.border_title = "Tasks"
+        # The keys that are not in the footer but are needed to pick anything.
+        tasks.border_subtitle = "space toggles, a takes the whole group"
         self.query_one("#detail", VerticalScroll).border_title = "Description"
         self.query_one("#log", RichLog).border_title = "Log"
-        self.query_one("#categories", ListView).border_title = "Categories"
         self.query_one("#progress", ProgressBar).display = False
+        # The log only earns its screen space once something is actually running.
+        self.query_one("#console", Vertical).display = False
+        self.query_one("#tasks", TaskList).focus()
         self._refresh_task_list()
         self._refresh_status()
         self._log("info", f"uniscript: detected {self.system.pretty_name}")
@@ -180,22 +241,31 @@ class UniscriptApp(App[None]):
 
     # --- view -----------------------------------------------------------------
 
-    def _facts_text(self) -> str:
-        gpus = ", ".join(sorted(self.system.gpu_vendors)) or "no data"
-        manager = self.system.package_manager.name if self.system.package_manager else "none"
-        rows = [
-            ("System", self.system.pretty_name),
-            ("Packages", manager),
-            ("Kernel", self.system.kernel),
-            ("Graphics", gpus),
-            ("Memory", f"{self.system.mem_total_gib:.1f} GiB"),
-        ]
-        return "\n".join(f"[$text-muted]{label:<8}[/] {escape(value)}" for label, value in rows)
+    def _matches(self, task: Task) -> bool:
+        if not self._query:
+            return True
+        haystack = " ".join(
+            (task.title, task.summary, task.id, task.category.label, " ".join(task.tags))
+        ).lower()
+        return all(word in haystack for word in self._query.lower().split())
 
-    def _tasks_in_category(self) -> list[Task]:
-        if self._current_category is None:
-            return list(self.tasks)
-        return [task for task in self.tasks if task.category is self._current_category]
+    def _visible_tasks(self) -> list[Task]:
+        """Tasks passing the filter, in catalogue order so categories stay grouped."""
+        return [task for task in self.tasks if self._matches(task)]
+
+    def _category_of_highlight(self) -> Category | None:
+        widget = self.query_one("#tasks", TaskList)
+        index = widget.highlighted
+        if index is None:
+            return None
+        try:
+            value = widget.get_option_at_index(index).value
+        except Exception:
+            return None
+        if isinstance(value, str) and value.startswith(_HEADER_PREFIX):
+            return Category.__members__.get(value.removeprefix(_HEADER_PREFIX))
+        task = self._task_by_id(value) if isinstance(value, str) else None
+        return task.category if task else None
 
     def _task_prompt(self, task: Task) -> str:
         applied = self._applied.get(task.id)
@@ -213,31 +283,77 @@ class UniscriptApp(App[None]):
         return f"{marker}  {title}"
 
     def _refresh_task_list(self) -> None:
-        widget = self.query_one("#tasks", SelectionList)
-        visible = self._tasks_in_category()
-        highlighted = widget.highlighted
+        widget = self.query_one("#tasks", TaskList)
+        visible = self._visible_tasks()
+        previous = widget.highlighted
+        rows: list[Task | None] = []
+        entries: list[Selection[str]] = []
+        current: Category | None = None
+        for task in visible:
+            if task.category is not current:
+                if current is not None:
+                    # A blank line between the groups, so a long list still reads
+                    # as sections rather than as one wall of titles.
+                    entries.append(
+                        Selection("", f"{_HEADER_PREFIX}gap:{task.category.name}", False, disabled=True)
+                    )
+                    rows.append(None)
+                current = task.category
+                entries.append(
+                    Selection(
+                        f"[b $text-accent]{escape(current.label.upper())}[/]",
+                        f"{_HEADER_PREFIX}{current.name}",
+                        False,
+                        disabled=True,
+                    )
+                )
+                rows.append(None)
+            entries.append(Selection(self._task_prompt(task), task.id, task.id in self.selected))
+            rows.append(task)
+
         self._syncing = True
         try:
             widget.clear_options()
-            widget.add_options(
-                [
-                    Selection(self._task_prompt(task), task.id, task.id in self.selected)
-                    for task in visible
-                ]
-            )
+            widget.add_options(entries)
         finally:
             self._syncing = False
-        if visible:
-            index = min(highlighted or 0, len(visible) - 1)
-            widget.highlighted = index
-            self._show_detail(visible[index])
-        else:
+
+        self._refresh_match_count(len(visible))
+        selectable = [index for index, task in enumerate(rows) if task is not None]
+        if not selectable:
             self._show_detail(None)
+            return
+        target = min(previous or selectable[0], len(rows) - 1)
+        if rows[target] is None:
+            # Landed on a header, take the nearest real task below it.
+            target = next((index for index in selectable if index >= target), selectable[0])
+        widget.highlighted = target
+        self._show_detail(rows[target])
+
+    def _refresh_match_count(self, matching: int) -> None:
+        # The log panel is hidden until something runs, so the count of what is
+        # selected has to live here, where it is always visible.
+        parts = [f"[$text-accent]{len(self.selected)}[/] selected"]
+        if self._query:
+            parts.append(f"[$text-muted]{matching} of {len(self.tasks)} match[/]")
+            parts.append("[$text-muted]escape clears[/]")
+        else:
+            parts.append(f"[$text-muted]{len(self.tasks)} tasks[/]")
+            done = sum(1 for value in self._applied.values() if value)
+            if done:
+                parts.append(f"[$text-muted]{done} already done[/]")
+        self.query_one("#match-count", Label).update("   ".join(parts))
 
     def _show_detail(self, task: Task | None) -> None:
         target = self.query_one("#detail-content", Static)
         if task is None:
-            target.update("[$text-muted]No tasks in this category.[/]")
+            if self._query:
+                target.update(
+                    f"[$text-muted]Nothing matches [/][b]{escape(self._query)}[/]"
+                    "[$text-muted]. Press escape to clear the filter.[/]"
+                )
+            else:
+                target.update("[$text-muted]No tasks are available for this system.[/]")
             return
 
         lines = [f"[b]{escape(task.title)}[/]", ""]
@@ -283,6 +399,7 @@ class UniscriptApp(App[None]):
             mode.update("[$text-success]live mode[/]")
         pending = sum(1 for task in self.tasks if task.id in self.selected)
         self.query_one("#status-count", Label).update(f"selected: {pending}")
+        self._refresh_match_count(len(self._visible_tasks()))
 
     def _log(self, level: str, message: str) -> None:
         try:
@@ -296,20 +413,14 @@ class UniscriptApp(App[None]):
 
     # --- events ---------------------------------------------------------------
 
-    @on(ListView.Highlighted, "#categories")
-    def _category_changed(self, event: ListView.Highlighted) -> None:
-        if event.item is None or event.item.id is None:
-            return
-        name = event.item.id.removeprefix("cat-")
-        self._current_category = Category[name]
-        self._refresh_task_list()
-
     @on(SelectionList.SelectedChanged, "#tasks")
     def _selection_changed(self, event: SelectionList.SelectedChanged[str]) -> None:
         if self._syncing:
             return
-        visible = {task.id for task in self._tasks_in_category()}
-        chosen = set(event.selection_list.selected)
+        visible = {task.id for task in self._visible_tasks()}
+        chosen = {
+            value for value in event.selection_list.selected if not value.startswith(_HEADER_PREFIX)
+        }
         self.selected -= visible - chosen
         self.selected |= chosen
         self._refresh_status()
@@ -320,21 +431,14 @@ class UniscriptApp(App[None]):
         if task is not None:
             self._show_detail(task)
 
-    @on(Button.Pressed, "#btn-recommended")
-    def _button_recommended(self) -> None:
-        self.action_preset_recommended()
+    @on(Input.Changed, "#search")
+    def _search_changed(self, event: Input.Changed) -> None:
+        self._query = event.value.strip()
+        self._refresh_task_list()
 
-    @on(Button.Pressed, "#btn-gaming")
-    def _button_gaming(self) -> None:
-        self.action_preset_gaming()
-
-    @on(Button.Pressed, "#btn-clear")
-    def _button_clear(self) -> None:
-        self.action_clear_selection()
-
-    @on(Button.Pressed, "#btn-run")
-    def _button_run(self) -> None:
-        self.action_start()
+    @on(Input.Submitted, "#search")
+    def _search_submitted(self) -> None:
+        self.query_one("#tasks", TaskList).focus()
 
     def _task_by_id(self, task_id: str) -> Task | None:
         for task in self.tasks:
@@ -363,9 +467,19 @@ class UniscriptApp(App[None]):
         self._apply_preset(ids, "gaming set")
 
     def action_select_category(self) -> None:
+        category = self._category_of_highlight()
+        if category is None:
+            return
         ids = set(self.selected)
-        ids |= {task.id for task in self._tasks_in_category() if not self._applied.get(task.id)}
-        self._apply_preset(ids, "whole category")
+        ids |= {
+            task.id
+            for task in self._visible_tasks()
+            if task.category is category and not self._applied.get(task.id)
+        }
+        self._apply_preset(ids, f"whole group: {category.label}")
+
+    def action_search(self) -> None:
+        self.query_one("#search", Input).focus()
 
     def action_clear_selection(self) -> None:
         self._apply_preset(set(), "selection cleared")
@@ -385,6 +499,11 @@ class UniscriptApp(App[None]):
     def action_clear_log(self) -> None:
         self.query_one("#log", RichLog).clear()
 
+    def action_switch_palette(self) -> None:
+        # Textual cannot ask the terminal for its background colour, so the
+        # light palette needs a key of its own.
+        self.theme = LIGHT_THEME.name if self.theme == DARK_THEME.name else DARK_THEME.name
+
     def action_show_system(self) -> None:
         self.push_screen(SystemScreen(self.system))
 
@@ -392,12 +511,18 @@ class UniscriptApp(App[None]):
         self.push_screen(HelpScreen())
 
     def action_abort(self) -> None:
-        if not self._busy:
+        # Aborting a running job wins over clearing the filter: that is the
+        # emergency use of this key.
+        if self._busy:
+            for worker in self.workers:
+                if worker.group == "run":
+                    worker.cancel()
+            self._log("warn", "aborting the current work")
             return
-        for worker in self.workers:
-            if worker.group == "run":
-                worker.cancel()
-        self._log("warn", "aborting the current work")
+        search = self.query_one("#search", Input)
+        if search.has_focus or self._query:
+            search.value = ""
+            self.query_one("#tasks", TaskList).focus()
 
     def action_quit(self) -> None:
         if self._busy:
@@ -497,6 +622,8 @@ class UniscriptApp(App[None]):
         done_ids: set[str] = set()
         failed: list[tuple[str, str]] = []
         progress = self.query_one("#progress", ProgressBar)
+        # From here on there is output worth watching, so the log earns its place.
+        self.query_one("#console", Vertical).display = True
         self._busy = True
         self._set_controls_enabled(False)
         progress.display = True
@@ -553,9 +680,8 @@ class UniscriptApp(App[None]):
         )
 
     def _set_controls_enabled(self, enabled: bool) -> None:
-        for button_id in ("#btn-recommended", "#btn-gaming", "#btn-clear", "#btn-run"):
-            self.query_one(button_id, Button).disabled = not enabled
-        self.query_one("#tasks", SelectionList).disabled = not enabled
+        self.query_one("#tasks", TaskList).disabled = not enabled
+        self.query_one("#search", Input).disabled = not enabled
 
 
 def run_app(
