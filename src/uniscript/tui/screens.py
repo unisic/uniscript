@@ -244,9 +244,10 @@ class HelpScreen(ModalScreen[None]):
     BINDINGS = [Binding("escape,enter,q,question_mark", "dismiss(None)", "Close")]
 
     HELP = """[b]Navigation[/]
-  [$accent]arrows[/]          move through the list
+  [$accent]up, down[/]        move through the list
+  [$accent]left, right[/]     switch the category tab
   [$accent]space[/]           select or deselect a task
-  [$accent]/[/]               filter the list, escape clears it
+  [$accent]/[/]               search everywhere, escape clears it
   [$accent]shift+arrows[/]    scroll the description (the wheel works too)
   [$accent]s[/]               details of the detected system
   [$accent]t[/]               switch between the dark and the light palette

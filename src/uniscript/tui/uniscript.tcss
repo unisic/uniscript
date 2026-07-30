@@ -1,49 +1,62 @@
-/* Palety siedza w app.py (DARK_THEME, LIGHT_THEME). Tutaj tylko uklad i ramki,
-   wszystkie kolory przez zmienne motywu, zeby dzialalo na jasnym tle tak samo. */
+/* Palety siedza w app.py (DARK_THEME, LIGHT_THEME) i przenosza kolory ciemnego
+   motywu WinUtila. Tutaj tylko uklad; wszystkie kolory przez zmienne motywu,
+   zeby jasna paleta dzialala z tego samego arkusza. */
 
 Screen {
     background: $background;
 }
 
-#workspace {
-    height: 1fr;
-}
+/* Gorny pasek: marka po lewej, szukanie w srodku, licznik po prawej. */
 
-/* Pasek filtra: jedna linia nad lista, bez wlasnej ramki, zeby nie mnozyc
-   obwodek nad ramka listy. */
-
-#filterbar {
+#topbar {
     height: 1;
     background: $panel;
+}
+
+#brand {
+    width: auto;
     padding: 0 2;
+    color: $accent;
+    text-style: bold;
 }
 
 #search {
     width: 1fr;
     height: 1;
-    padding: 0;
+    padding: 0 1;
     border: none;
-    background: transparent;
+    background: $background;
     color: $foreground;
 }
 
 #search:focus {
-    background: transparent;
+    background: $background;
     color: $foreground;
-    text-style: bold;
 }
 
 #match-count {
     width: auto;
-    padding-left: 2;
+    padding: 0 2;
     color: $text-muted;
 }
 
-/* Panele: ta sama ramka, ta sama reakcja na fokus. */
+/* Zakladki kategorii, jak pasek Install / Tweaks / Config w WinUtilu. */
+
+#tabs {
+    height: 2;
+    background: $background;
+    margin: 0 1;
+}
+
+/* Panele obok siebie: lista po lewej, opis po prawej. */
+
+#workspace {
+    height: 1fr;
+}
 
 #tasks, #detail {
-    border: round $primary 40%;
-    border-title-color: $text-primary;
+    border: round $panel-lighten-1;
+    border-title-color: $text-accent;
     border-title-style: bold;
     background: $surface;
 }
@@ -53,16 +66,25 @@ Screen {
 }
 
 #tasks {
-    height: 3fr;
-    min-height: 8;
+    width: 3fr;
+    min-width: 40;
+    height: 100%;
     padding: 0 1;
     scrollbar-size-vertical: 1;
     border-subtitle-color: $text-muted;
 }
 
-/* Widoczne puste pudelko to "niezaznaczone", zielony X to "zaznaczone". Tlo
-   pudelka jest zawsze takie samo, zeby ruch kursora nie wygladal jak zmiana
-   stanu, a kolor X w stanie pustym zlewa sie z tlem pudelka. */
+#detail {
+    width: 2fr;
+    min-width: 28;
+    overflow-x: hidden;
+    padding: 0 2;
+    scrollbar-size-vertical: 1;
+}
+
+/* Widoczne puste pudelko to "niezaznaczone", niebieski X w kolorze wlacznika
+   WinUtila to "zaznaczone". Tlo pudelka jest zawsze takie samo, zeby ruch
+   kursora nie wygladal jak zmiana stanu. */
 
 #tasks > .selection-list--button,
 #tasks > .selection-list--button-highlighted {
@@ -72,19 +94,49 @@ Screen {
 
 #tasks > .selection-list--button-selected,
 #tasks > .selection-list--button-selected-highlighted {
-    color: $text-success;
+    color: $toggle-on;
     background: $panel-lighten-1;
 }
 
-#detail {
-    height: 2fr;
-    min-height: 8;
-    overflow-x: hidden;
-    padding: 0 2;
-    scrollbar-size-vertical: 1;
+/* Pasek akcji na dole, odpowiednik przyciskow WinUtila. */
+
+#actionbar {
+    height: 1;
+    background: $panel;
+    padding: 0 1;
 }
 
-/* Konsola: ukryta do pierwszego uruchomienia, wiec ma wlasny naglowek statusu. */
+#actionbar Button {
+    width: auto;
+    margin: 0 1 0 0;
+    border: none;
+    background: $btn-bg;
+    color: $foreground;
+}
+
+#actionbar Button:hover {
+    background: $btn-hover;
+}
+
+#actionbar #act-run {
+    text-style: bold;
+}
+
+#actionbar #act-dry.-live {
+    color: $text-warning;
+    text-style: bold;
+}
+
+#sysinfo {
+    width: 1fr;
+    content-align: right middle;
+    padding: 0 1;
+    color: $text-muted;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
+
+/* Konsola: ukryta do pierwszego uruchomienia. */
 
 #console {
     height: 14;
@@ -112,8 +164,8 @@ Screen {
 
 #log {
     height: 1fr;
-    border: round $primary 40%;
-    border-title-color: $text-primary;
+    border: round $panel-lighten-1;
+    border-title-color: $text-accent;
     border-title-style: bold;
     background: $surface;
     padding: 0 1;
@@ -168,7 +220,7 @@ PlanScreen, PromptScreen, SummaryScreen, SystemScreen, HelpScreen {
 
 #plan-body, #summary-body, #system-body, #help-body {
     height: 1fr;
-    border: round $primary 40%;
+    border: round $panel-lighten-1;
     padding: 0 1;
     margin-bottom: 1;
 }

@@ -66,14 +66,17 @@ UNISCRIPT_SYSTEM_PYTHON=1 ./uniscript   # use the system Python instead
 
 ## The interface
 
-One list of tasks grouped by category, the description of the highlighted task
-below it, and a log that appears when something starts running.
+Category tabs across the top, the task list on the left, the description of the
+highlighted task on the right, action buttons at the bottom, and a log that
+appears when something starts running. The layout and the palette follow
+[WinUtil](https://github.com/ChrisTitusTech/winutil), translated to a terminal.
 
 | Key | Does |
 | --- | --- |
-| arrows | move through the list |
+| up, down | move through the list |
+| left, right | switch the category tab |
 | space | select or deselect a task |
-| `/` | filter the list, `esc` clears the filter |
+| `/` | search everywhere, `esc` clears it |
 | shift+arrows | scroll the description (the wheel works too) |
 | `e` | the essentials set |
 | `g` | the gaming set |

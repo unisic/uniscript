@@ -13,13 +13,12 @@ from textual import events, on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.content import Content
 from textual.markup import escape
 from textual.strip import Strip
 from textual.theme import Theme
 from textual.widgets import (
+    Button,
     Footer,
-    Header,
     Input,
     Label,
     OptionList,
@@ -27,6 +26,8 @@ from textual.widgets import (
     RichLog,
     SelectionList,
     Static,
+    Tab,
+    Tabs,
 )
 from textual.widgets.option_list import OptionDoesNotExist
 from textual.widgets.selection_list import Selection
@@ -46,37 +47,65 @@ LOG_MAX_LINES = 2000
 # The value of a list entry that is a category header rather than a task.
 _HEADER_PREFIX = "\x00header:"
 
-# One palette, so a colour always means the same thing: green is done, amber is
-# "changes system behaviour", red is "can break the system".
+# The dark palette follows the WinUtil dark theme (ChrisTitusTech/winutil,
+# config/themes.json): graphite background, cyan group labels, steel blue for
+# the cursor, WinUtil's toggle blue for a ticked box and its green for success.
+# Amber and red carry the meanings WinUtil does not need: "changes system
+# behaviour" and "can break the system".
 DARK_THEME = Theme(
     name="uniscript-dark",
-    primary="#5a9fd4",
-    secondary="#5fb3a1",
-    accent="#7aa2f7",
-    warning="#d9a441",
-    error="#d96666",
-    success="#7fb069",
-    foreground="#c9ced8",
-    background="#15181e",
-    surface="#1c2028",
-    panel="#242935",
+    primary="#5e81ac",
+    secondary="#81a1c1",
+    accent="#5bdcff",
+    warning="#ebcb8b",
+    error="#bf616a",
+    success="#6eff72",
+    foreground="#f7f7f7",
+    background="#232629",
+    surface="#26292d",
+    panel="#2f373d",
     dark=True,
+    variables={
+        "toggle-on": "#2e77ff",
+        "btn-bg": "#1e3747",
+        "btn-hover": "#3b4252",
+    },
 )
 
+# The same roles moved onto a light background; WinUtil itself is dark only.
 LIGHT_THEME = Theme(
     name="uniscript-light",
-    primary="#2f6ea5",
+    primary="#4a6e96",
     secondary="#2f7d6c",
-    accent="#3b5fa8",
+    accent="#00779d",
     warning="#9a6a12",
     error="#a83232",
-    success="#3f7a2e",
+    success="#2e7d32",
     foreground="#1f2328",
-    background="#fbfbfa",
-    surface="#f2f2f0",
-    panel="#e6e6e3",
+    background="#fafafa",
+    surface="#f1f2f3",
+    panel="#e0e4e8",
     dark=False,
+    variables={
+        "toggle-on": "#1d5fcc",
+        "btn-bg": "#d5e0ea",
+        "btn-hover": "#c2d1de",
+    },
 )
+
+# Tab captions; the full Category.label would not fit eleven tabs in a row.
+_TAB_LABELS = {
+    Category.SYSTEM: "System",
+    Category.REPOS: "Repos",
+    Category.DRIVERS: "Drivers",
+    Category.MULTIMEDIA: "Media",
+    Category.PACKAGING: "Flatpak",
+    Category.GAMING: "Gaming",
+    Category.TWEAKS: "Tweaks",
+    Category.SHELL: "Shell",
+    Category.APPS: "Apps",
+    Category.MAINTENANCE: "Cleanup",
+}
 
 
 class TaskList(SelectionList[str]):
@@ -124,12 +153,13 @@ class UniscriptApp(App[None]):
 
     BINDINGS = [
         Binding("slash", "search", "Search"),
-        Binding("r", "start", "Run"),
-        Binding("e", "preset_recommended", "Essentials"),
-        Binding("g", "preset_gaming", "Gaming"),
         Binding("question_mark", "help", "Help"),
         Binding("q", "quit", "Quit"),
-        # The rest stay off the footer, which only has room for a handful.
+        # Run, dry run and the presets are buttons on the action bar, and the
+        # rest stays off the footer, which only has room for a handful.
+        Binding("r", "start", "Run", show=False),
+        Binding("e", "preset_recommended", "Essentials", show=False),
+        Binding("g", "preset_gaming", "Gaming", show=False),
         Binding("a", "select_category", "Select the whole group", show=False),
         Binding("n", "clear_selection", "Deselect everything", show=False),
         Binding("d", "toggle_dry_run", "Dry run", show=False),
@@ -137,6 +167,8 @@ class UniscriptApp(App[None]):
         Binding("t", "switch_palette", "Light or dark palette", show=False),
         Binding("shift+down", "scroll_detail(1)", "Scroll the description", show=False),
         Binding("shift+up", "scroll_detail(-1)", "Scroll the description", show=False),
+        Binding("left", "prev_tab", "Previous tab", show=False),
+        Binding("right", "next_tab", "Next tab", show=False),
         Binding("l", "toggle_console", "Log panel", show=False),
         Binding("c", "clear_log", "Clear log", show=False),
         Binding("escape", "abort", "Abort", show=False),
@@ -161,33 +193,41 @@ class UniscriptApp(App[None]):
         self.selected: set[str] = set()
         self._applied: dict[str, bool | None] = {}
         self._query = ""
+        self._active_category: Category | None = None
         self._syncing = False
         self._busy = False
-        self.sub_title = self._subtitle()
+        # Before compose: the stylesheet uses variables these themes define.
+        self.register_theme(DARK_THEME)
+        self.register_theme(LIGHT_THEME)
+        self.theme = "uniscript-dark"
 
     def _subtitle(self) -> str:
         manager = self.system.package_manager.name if self.system.package_manager else "none"
-        return f"{self.system.pretty_name}  |  {manager}  |  {len(self.tasks)} tasks"
-
-    def format_title(self, title: str, sub_title: str) -> Content:
-        """The default header joins the two with an em dash, the rest of the app uses a bar."""
-        if not sub_title:
-            return Content(title)
-        return Content.assemble(
-            Content(title),
-            ("  |  ", "dim"),
-            Content(sub_title).stylize("dim"),
-        )
+        return f"{self.system.pretty_name}  |  {manager}"
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=True)
-        with Vertical(id="workspace"):
-            with Horizontal(id="filterbar"):
-                yield Input(placeholder="press / to filter the tasks", id="search")
-                yield Label("", id="match-count")
+        with Horizontal(id="topbar"):
+            yield Label("uniscript", id="brand")
+            yield Input(placeholder="search the tasks  ( / )", id="search")
+            yield Label("", id="match-count")
+        yield Tabs(
+            Tab("All", id="tab-ALL"),
+            *(
+                Tab(_TAB_LABELS.get(category, category.label), id=f"tab-{category.name}")
+                for category in self.categories
+            ),
+            id="tabs",
+        )
+        with Horizontal(id="workspace"):
             yield TaskList(id="tasks")
             with VerticalScroll(id="detail"):
                 yield Static("", id="detail-content")
+        with Horizontal(id="actionbar"):
+            yield Button("Run selected (r)", id="act-run", compact=True)
+            yield Button("Dry run: on (d)", id="act-dry", compact=True)
+            yield Button("Essentials (e)", id="act-ess", compact=True)
+            yield Button("Gaming (g)", id="act-gaming", compact=True)
+            yield Label(self._subtitle(), id="sysinfo")
         with Vertical(id="console"):
             with Horizontal(id="statusbar"):
                 yield Label("", id="status-mode")
@@ -203,22 +243,23 @@ class UniscriptApp(App[None]):
         yield Footer()
 
     def on_mount(self) -> None:
-        self.register_theme(DARK_THEME)
-        self.register_theme(LIGHT_THEME)
-        self.theme = "uniscript-dark"
         tasks = self.query_one("#tasks", TaskList)
         tasks.border_title = "Tasks"
         # The keys that are not in the footer but are needed to pick anything.
         tasks.border_subtitle = "space toggles, a takes the whole group"
         detail = self.query_one("#detail", VerticalScroll)
         detail.border_title = "Description"
-        # A click on the description or the log must not steal the keyboard from
-        # the list: arrows would silently scroll the panel and look dead. The
-        # wheel still scrolls both, shift+arrows scroll the description.
+        # A click on the description, the log, the tabs or a button must not
+        # steal the keyboard from the list: arrows always drive the list,
+        # left and right switch tabs, the wheel scrolls what it hovers over
+        # and shift+arrows scroll the description.
         detail.can_focus = False
         log = self.query_one("#log", RichLog)
         log.border_title = "Log"
         log.can_focus = False
+        self.query_one("#tabs", Tabs).can_focus = False
+        for button in self.query("#actionbar Button"):
+            button.can_focus = False
         self.query_one("#progress", ProgressBar).display = False
         # The log only earns its screen space once something is actually running.
         self.query_one("#console", Vertical).display = False
@@ -259,8 +300,13 @@ class UniscriptApp(App[None]):
         return all(word in haystack for word in self._query.lower().split())
 
     def _visible_tasks(self) -> list[Task]:
-        """Tasks passing the filter, in catalogue order so categories stay grouped."""
-        return [task for task in self.tasks if self._matches(task)]
+        """Tasks passing the tab and the filter, in catalogue order."""
+        return [
+            task
+            for task in self.tasks
+            if self._matches(task)
+            and (self._active_category is None or task.category is self._active_category)
+        ]
 
     def _category_of_highlight(self) -> Category | None:
         widget = self.query_one("#tasks", TaskList)
@@ -299,7 +345,8 @@ class UniscriptApp(App[None]):
         entries: list[Selection[str]] = []
         current: Category | None = None
         for task in visible:
-            if task.category is not current:
+            # On a category tab the tab itself is the header.
+            if self._active_category is None and task.category is not current:
                 if current is not None:
                     # A blank line between the groups, so a long list still reads
                     # as sections rather than as one wall of titles.
@@ -340,18 +387,16 @@ class UniscriptApp(App[None]):
         self._show_detail(rows[target])
 
     def _refresh_match_count(self, matching: int) -> None:
-        # The log panel is hidden until something runs, so the count of what is
-        # selected has to live here, where it is always visible.
-        parts = [f"[$text-accent]{len(self.selected)}[/] selected"]
+        # The selected count lives on the run button, so this stays about the view.
         if self._query:
-            parts.append(f"[$text-muted]{matching} of {len(self.tasks)} match[/]")
-            parts.append("[$text-muted]escape clears[/]")
+            text = (
+                f"[$text-accent]{matching}[/] of {len(self.tasks)} match"
+                "   [$text-muted]escape clears[/]"
+            )
         else:
-            parts.append(f"[$text-muted]{len(self.tasks)} tasks[/]")
             done = sum(1 for value in self._applied.values() if value)
-            if done:
-                parts.append(f"[$text-muted]{done} already done[/]")
-        self.query_one("#match-count", Label).update("   ".join(parts))
+            text = f"[$text-muted]{len(self.tasks)} tasks, {done} already done[/]"
+        self.query_one("#match-count", Label).update(text)
 
     def _show_detail(self, task: Task | None) -> None:
         target = self.query_one("#detail-content", Static)
@@ -408,6 +453,10 @@ class UniscriptApp(App[None]):
             mode.update("[$text-success]live mode[/]")
         pending = sum(1 for task in self.tasks if task.id in self.selected)
         self.query_one("#status-count", Label).update(f"selected: {pending}")
+        dry = self.query_one("#act-dry", Button)
+        dry.label = f"Dry run: {'on' if self.dry_run else 'OFF'} (d)"
+        dry.set_class(not self.dry_run, "-live")
+        self.query_one("#act-run", Button).label = f"Run selected: {pending} (r)"
         self._refresh_match_count(len(self._visible_tasks()))
 
     def _log(self, level: str, message: str) -> None:
@@ -440,14 +489,40 @@ class UniscriptApp(App[None]):
         if task is not None:
             self._show_detail(task)
 
+    @on(Tabs.TabActivated, "#tabs")
+    def _tab_changed(self, event: Tabs.TabActivated) -> None:
+        name = (event.tab.id or "").removeprefix("tab-")
+        self._active_category = Category.__members__.get(name)
+        self._refresh_task_list()
+
     @on(Input.Changed, "#search")
     def _search_changed(self, event: Input.Changed) -> None:
         self._query = event.value.strip()
+        # A search is global; a category tab would silently hide most matches.
+        if self._query and self._active_category is not None:
+            self.query_one("#tabs", Tabs).active = "tab-ALL"
+            return  # the tab handler refreshes the list
         self._refresh_task_list()
 
     @on(Input.Submitted, "#search")
     def _search_submitted(self) -> None:
         self.query_one("#tasks", TaskList).focus()
+
+    @on(Button.Pressed, "#act-run")
+    def _button_run(self) -> None:
+        self.action_start()
+
+    @on(Button.Pressed, "#act-dry")
+    def _button_dry(self) -> None:
+        self.action_toggle_dry_run()
+
+    @on(Button.Pressed, "#act-ess")
+    def _button_essentials(self) -> None:
+        self.action_preset_recommended()
+
+    @on(Button.Pressed, "#act-gaming")
+    def _button_gaming(self) -> None:
+        self.action_preset_gaming()
 
     def on_key(self, event: events.Key) -> None:
         # Arrows in the filter field jump to the list, so typing a filter and
@@ -497,6 +572,12 @@ class UniscriptApp(App[None]):
 
     def action_search(self) -> None:
         self.query_one("#search", Input).focus()
+
+    def action_prev_tab(self) -> None:
+        self.query_one("#tabs", Tabs).action_previous_tab()
+
+    def action_next_tab(self) -> None:
+        self.query_one("#tabs", Tabs).action_next_tab()
 
     def action_clear_selection(self) -> None:
         self._apply_preset(set(), "selection cleared")
@@ -706,6 +787,9 @@ class UniscriptApp(App[None]):
     def _set_controls_enabled(self, enabled: bool) -> None:
         self.query_one("#tasks", TaskList).disabled = not enabled
         self.query_one("#search", Input).disabled = not enabled
+        self.query_one("#tabs", Tabs).disabled = not enabled
+        for button in self.query("#actionbar Button"):
+            button.disabled = not enabled
 
 
 def run_app(
