@@ -1,0 +1,209 @@
+Screen {
+    background: $background;
+}
+
+#body {
+    height: 1fr;
+}
+
+#sidebar {
+    width: 38;
+    background: $surface;
+    border-right: vkey $primary 30%;
+}
+
+#facts {
+    height: auto;
+    padding: 1 2;
+    background: $panel;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
+
+#categories {
+    height: 1fr;
+    min-height: 11;
+    background: transparent;
+    border-top: hkey $primary 30%;
+    padding: 0 1;
+}
+
+#categories > ListItem {
+    padding: 0 1;
+    background: transparent;
+}
+
+#categories > ListItem.--highlight {
+    background: $primary 25%;
+    color: $text;
+    text-style: bold;
+}
+
+#actions {
+    height: auto;
+    padding: 1 2;
+    border-top: hkey $primary 30%;
+}
+
+#actions Button {
+    width: 100%;
+    height: 1;
+    content-align: left middle;
+    text-align: left;
+    color: $text-muted;
+}
+
+#actions Button:hover {
+    color: $text;
+    background: $primary 25%;
+}
+
+#actions Button:focus {
+    color: $text;
+    text-style: bold;
+}
+
+#actions #btn-run {
+    color: $text-success;
+    text-style: bold;
+}
+
+#workspace {
+    width: 1fr;
+}
+
+#tasks {
+    height: 3fr;
+    border: round $primary 40%;
+    border-title-color: $text-primary;
+    border-title-style: bold;
+    padding: 0 1;
+    background: $surface;
+}
+
+#tasks:focus {
+    border: round $accent;
+}
+
+#detail {
+    height: 2fr;
+    min-height: 8;
+    overflow-x: hidden;
+    border: round $primary 40%;
+    border-title-color: $text-primary;
+    border-title-style: bold;
+    padding: 0 2;
+    background: $surface;
+}
+
+#detail:focus {
+    border: round $accent;
+}
+
+#console {
+    height: 14;
+    border-top: hkey $primary 30%;
+}
+
+#statusbar {
+    height: 1;
+    background: $panel;
+    padding: 0 2;
+}
+
+#status-mode {
+    width: auto;
+}
+
+#status-count {
+    width: 1fr;
+    padding-left: 3;
+    color: $text-muted;
+}
+
+#progress {
+    width: 34;
+}
+
+#log {
+    height: 1fr;
+    background: $surface;
+    padding: 0 2;
+    overflow-x: hidden;
+    scrollbar-size-vertical: 1;
+}
+
+/* Okna modalne */
+
+PlanScreen, PromptScreen, SummaryScreen, SystemScreen, HelpScreen {
+    align: center middle;
+    background: $background 60%;
+}
+
+#plan-dialog, #summary-dialog, #system-dialog, #help-dialog {
+    width: 100;
+    max-width: 90%;
+    height: 34;
+    max-height: 90%;
+    background: $surface;
+    border: round $accent;
+    padding: 1 2;
+}
+
+#prompt-dialog {
+    width: 70;
+    max-width: 90%;
+    height: auto;
+    background: $surface;
+    border: round $accent;
+    padding: 1 2;
+}
+
+#plan-title, #summary-title, #system-title, #help-title, #prompt-title {
+    text-style: bold;
+    color: $text-accent;
+    width: 100%;
+}
+
+#plan-mode {
+    width: 100%;
+    margin-bottom: 1;
+}
+
+#plan-mode.dry {
+    color: $text-warning;
+}
+
+#plan-mode.live {
+    color: $text-success;
+}
+
+#plan-body, #summary-body, #system-body, #help-body {
+    height: 1fr;
+    border: round $primary 30%;
+    padding: 0 1;
+    margin-bottom: 1;
+}
+
+#plan-buttons, #prompt-buttons {
+    height: auto;
+    align-horizontal: right;
+}
+
+#plan-buttons Button, #prompt-buttons Button {
+    margin-left: 2;
+}
+
+#prompt-label {
+    color: $text-muted;
+    margin-bottom: 1;
+}
+
+#prompt-error {
+    height: 1;
+    margin-bottom: 1;
+}
+
+#summary-dialog Button, #system-dialog Button, #help-dialog Button {
+    width: 100%;
+}
