@@ -26,14 +26,13 @@ touches the system packages.
 One line, clones the repository into `~/uniscript` and starts the interface:
 
 ```sh
-bash <(curl -fsSL https://raw.githubusercontent.com/UZYTKOWNIK/uniscript/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/unisic/uniscript/main/install.sh)
 ```
 
-Before that works, replace `UZYTKOWNIK` in `install.sh` (the `REPO` constant at
-the top of the file) with the address of your own repository and push the
-change. The target path and the branch can be overridden with `UNISCRIPT_DIR`,
-`UNISCRIPT_REPO` and `UNISCRIPT_BRANCH`. Running the same line again updates the
-existing clone with `git merge --ff-only` instead of cloning it a second time.
+The target path, the repository and the branch can be overridden with
+`UNISCRIPT_DIR`, `UNISCRIPT_REPO` and `UNISCRIPT_BRANCH`. Running the same line
+again updates the existing clone with `git merge --ff-only` instead of cloning
+it a second time.
 
 The `bash <(curl ...)` form matters more here than usual: with `curl | bash` the
 pipe takes standard input, and the interface needs a terminal. The installer
@@ -121,38 +120,47 @@ are never selected by default.
 
 ## What is in the task catalogue
 
-72 tasks in the catalogue. Only the ones matching the detected system and
+77 tasks in the catalogue. Only the ones matching the detected system and
 hardware are shown. On the test machine (NVIDIA, KDE, Btrfs, desktop) that comes
 out as 44 tasks on Fedora, 40 on Ubuntu, 39 on Arch and 34 on openSUSE.
 
-**Shared by all four families** (28 tasks): Flathub, the verified subset,
+**Shared by all four families** (31 tasks): Flathub, the verified subset,
 Flatpak access to the system theme, tools for managing Flatpaks, four
 application sets from Flathub (multimedia, office, system tools, messengers),
-installing snapd marked as not recommended, Heroic, Bottles, ProtonUp-Qt,
-MangoHud configuration, kernel limits for gaming, the `vm`, `net` and `fs`
-parameters, zram, an IO scheduler matched to the drive, a size cap on the
-systemd journal, a weekly TRIM, a shorter boot, encrypted DNS through
-systemd-resolved, a firewall, a tuned profile, cache cleanup, switching the
-login shell to zsh, fish or back to bash, and the starship prompt.
+removing snapd, installing snapd marked as not recommended, Heroic, Bottles,
+ProtonUp-Qt, MangoHud configuration, kernel limits for gaming, the `vm`, `net`
+and `fs` parameters, zram, an IO scheduler matched to the drive, a size cap on
+the systemd journal, a weekly TRIM, a shorter boot, encrypted DNS through
+systemd-resolved, a firewall, a power profile for a laptop, a tuned profile,
+turning the CPU mitigations off (marked risky), cache cleanup, switching the
+login shell to zsh, fish or back to bash, and the starship prompt. Some of them
+are conditional: the power profile only appears on a portable chassis, the
+tuned profile where `tuned-adm` is available or the family ships it, and
+`mitigations=off` only where the kernel command line can be edited.
 
-**Fedora and RHEL only** (15): RPM Fusion free and nonfree, RPM Fusion tainted,
-the Cisco openh264 codec, COPR with a prompt for the repository name, Terra,
-faster dnf, the full ffmpeg and codecs, the NVIDIA driver (the open module for
-Turing and newer, the proprietary one for older cards), a gaming set, Btrfs
-snapshots, firmware updates through fwupd, removing old kernels, the clock in
-UTC for dual boot, archive support.
+**Fedora and RHEL only** (18): a full system upgrade, RPM Fusion free and
+nonfree, RPM Fusion tainted, the Cisco openh264 codec, COPR with a prompt for
+the repository name, Terra, faster dnf, the full ffmpeg and codecs, the NVIDIA
+driver (the open module for Turing and newer, the proprietary one for older
+cards), hardware video decoding for AMD and for Intel (one task each), a gaming
+set, Btrfs snapshots, firmware updates through fwupd, removing old kernels, the
+clock in UTC for dual boot, archive support, and a warning shown when an atomic
+variant is detected.
 
-**Debian, Ubuntu and Mint only** (11): universe and multiverse, Microsoft codecs
-and fonts, Firefox from the Mozilla repository instead of the snap, removing
-snapd with an apt pin against its return, drivers through `ubuntu-drivers` or
-the `nvidia-driver` package, a gaming set, earlyoom, apt tuning.
+**Debian, Ubuntu and Mint only** (11): a full system upgrade, universe and
+multiverse, contrib, non-free and non-free-firmware on Debian, Microsoft codecs
+and fonts, Firefox from the Mozilla repository instead of the snap, drivers
+through `ubuntu-drivers` or the `nvidia-driver` package, a gaming set,
+earlyoom, apt tuning, archive support, the clock in UTC for dual boot.
 
-**Arch, CachyOS and EndeavourOS only** (11): sorting out the mirror list, an AUR
-helper (paru or yay, one task each), multilib, drivers, a gaming set, pacman
-tuning, a cap on the package cache.
+**Arch, CachyOS and EndeavourOS only** (11): a full system upgrade, sorting out
+the mirror list, an AUR helper (paru or yay, one task each), multilib, codecs,
+drivers, a gaming set, pacman tuning, a cap on the package cache, the clock in
+UTC for dual boot.
 
-**openSUSE only** (6): Packman with `--allow-vendor-change`, drivers, a gaming
-set, archive support.
+**openSUSE only** (6): a full system upgrade, Packman with
+`--allow-vendor-change`, drivers, a gaming set, archive support, the clock in
+UTC for dual boot.
 
 Snaps: on Ubuntu there is a task that removes every snap, uninstalls snapd and
 blocks its return through apt, together with swapping Firefox for the build from

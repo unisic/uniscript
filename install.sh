@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Fetches uniscript and runs it. Usage:
-#   bash <(curl -fsSL https://raw.githubusercontent.com/UZYTKOWNIK/uniscript/main/install.sh)
+#   bash <(curl -fsSL https://raw.githubusercontent.com/unisic/uniscript/main/install.sh)
 set -euo pipefail
 
-REPO="${UNISCRIPT_REPO:-https://github.com/UZYTKOWNIK/uniscript.git}"
+REPO="${UNISCRIPT_REPO:-https://github.com/unisic/uniscript.git}"
 BRANCH="${UNISCRIPT_BRANCH:-main}"
 TARGET="${UNISCRIPT_DIR:-$HOME/uniscript}"
 
