@@ -56,6 +56,9 @@ fi
 
 [ -x "$TARGET/uniscript" ] || die "$TARGET/uniscript is missing"
 
+# Someone arriving through the one-line install may never have opened the README.
+info "early version: only Fedora has been run on a live machine, the other distributions are untested. Start with --dry-run and read the plan."
+
 # With "curl | bash" standard input is taken by the pipe, and the interface needs
 # a terminal. Attach /dev/tty when it can actually be opened: the file exists even
 # in a session with no controlling terminal, where opening it fails.

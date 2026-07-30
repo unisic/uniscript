@@ -8,6 +8,33 @@ codecs, Flatpak, a gaming set, shell switching and conservative tweaks.
 Nothing happens on its own. You pick the tasks, you read the full plan of
 commands, and only then you run it.
 
+## Early version, read this first
+
+This is version 0.1.0 and it should be treated as such. It is software that
+installs packages, adds repositories, edits files under `/etc` and changes your
+login shell, so a mistake here costs more than a mistake in an ordinary program.
+
+Only Fedora has been run on a live machine. Debian, Ubuntu, Arch and openSUSE
+are written but never executed, so on those systems assume the commands are
+untested. The details of what was and was not checked are in
+[Verification status](#verification-status), and they are worth reading before
+the first run.
+
+What that means in practice:
+
+- Start with `./uniscript --dry-run` and read the plan before you let anything
+  run. Nothing is executed until you confirm it.
+- Have a way back. Every file change is backed up with a generated `restore.sh`,
+  but a backup is not a substitute for a system snapshot or a working backup of
+  your data.
+- Do not run this on a machine you cannot afford to reinstall, and do not run it
+  on a production server.
+- Tasks marked `risk` can break the system or weaken its security. They are
+  never selected by default and there is a reason for that.
+
+Bug reports are welcome, especially from the distributions that have not been
+tested here.
+
 ## Requirements
 
 - Linux with systemd (another init is detected, but the tasks touching services
