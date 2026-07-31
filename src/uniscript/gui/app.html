@@ -25,9 +25,10 @@
   body {
     margin: 0; background: var(--bg); color: var(--fg);
     font: 14px/1.5 system-ui, sans-serif;
-    display: grid; grid-template-rows: auto 1fr auto auto;
+    display: grid; grid-template-rows: auto auto 1fr auto auto;
     grid-template-columns: 220px minmax(320px, 3fr) minmax(280px, 2fr);
-    grid-template-areas: "top top top" "side list detail" "actions actions actions" "log log log";
+    grid-template-areas: "top top top" "intro intro intro" "side list detail"
+      "actions actions actions" "log log log";
     gap: 8px; padding: 0 8px 8px; height: 100vh;
   }
   button { font: inherit; color: inherit; background: var(--panel-2); border: none;
@@ -74,8 +75,16 @@
   .row .mark.ok { color: var(--green); }
   .row .mark.med { color: var(--amber); }
   .row .mark.high { color: var(--red); }
+  .row .mark.rm { color: var(--red); }
+  .row .rmtag { color: var(--red); font-size: 12px; }
   .row.applied .title { color: var(--muted); }
   .row input { accent-color: var(--blue); }
+
+  #intro { grid-area: intro; padding: 10px 14px; background: var(--panel);
+    border: 1px solid var(--panel-2); border-radius: 8px; display: none; }
+  #intro.show { display: block; }
+  #intro ol { margin: 6px 0 0; padding-left: 20px; }
+  #intro .dismiss { float: right; margin-left: 12px; }
 
   aside { grid-area: detail; padding: 14px 18px; }
   aside h2 { margin: 0 0 8px; font-size: 16px; }
@@ -89,6 +98,9 @@
   aside .sourcepick { display: flex; gap: 8px; align-items: center; margin: 10px 0; }
   aside .sourcepick button { padding: 3px 12px; }
   aside .sourcepick button.picked { background: var(--blue); color: var(--bg); font-weight: 600; }
+  aside .uninst { margin: 10px 0; }
+  aside .uninst button { padding: 3px 12px; }
+  aside .uninst button.armed { background: var(--red); color: var(--bg); font-weight: 600; }
   aside ul { margin: 8px 0; padding-left: 18px; }
   aside pre { background: var(--bg); border: 1px solid var(--panel-2);
     border-radius: 6px; padding: 8px 10px; overflow-x: auto; font-size: 12.5px; }
@@ -143,6 +155,16 @@
   <input type="search" id="search" placeholder="search the tasks">
   <span class="sys" id="sys"></span>
 </header>
+<div id="intro">
+  <button class="dismiss" id="intro-close">Got it</button>
+  <strong>New here? Three steps:</strong>
+  <ol>
+    <li>Tick the tasks you want; the right pane explains each one.</li>
+    <li>Press <strong>Run</strong> to read the exact commands first.</li>
+    <li>Confirm, and only then anything happens. With <strong>Dry run</strong> on,
+      nothing is ever changed. Quick setup picks a sensible starter set for you.</li>
+  </ol>
+</div>
 <nav class="pane" id="nav"></nav>
 <main class="pane" id="list"></main>
 <aside class="pane" id="detail"><p style="color:var(--muted)">Pick a task to see what it does.</p></aside>
@@ -159,6 +181,8 @@
   <button id="btn-gaming"
     title="Select the recommended set plus the gaming stack: Heroic, Bottles, Proton managers, MangoHud.">Gaming set</button>
   <button id="btn-none" title="Clear the selection.">None</button>
+  <button id="btn-restore"
+    title="Put configuration files back the way a previous run found them.">Restore</button>
   <span class="count" id="count"></span>
 </div>
 <div id="logwrap">
@@ -174,6 +198,7 @@
 <dialog id="dlg-quick"></dialog>
 <dialog id="dlg-plan"></dialog>
 <dialog id="dlg-summary"></dialog>
+<dialog id="dlg-restore"></dialog>
 
 <script>
 "use strict";
@@ -184,6 +209,7 @@ const esc = (text) => String(text ?? "").replace(/[&<>"]/g, (c) => ({"&":"&amp;"
 
 let state = null;
 let selected = new Set();
+let removeSet = new Set();  // installed apps marked to be uninstalled
 let activeCategory = null;
 let currentTask = null;
 let dryRun = true;
@@ -229,13 +255,15 @@ function renderNav() {
 
 function taskRow(t) {
   const applied = t.applied === true;
+  const removing = removeSet.has(t.id);
   const [glyph, , cls] = RISK[t.risk] ?? RISK.SAFE;
-  const mark = applied ? `<span class="mark ok">✓</span>`
+  const mark = removing ? `<span class="mark rm">✗</span>`
+    : applied ? `<span class="mark ok">✓</span>`
     : glyph ? `<span class="mark ${cls}">${glyph}</span>` : `<span class="mark"></span>`;
   return `<div class="row ${applied ? "applied" : ""} ${t.id === currentTask ? "current" : ""}"
       data-id="${t.id}" tabindex="0">
     <input type="checkbox" ${selected.has(t.id) ? "checked" : ""} aria-label="select ${esc(t.title)}">
-    ${mark}<span class="title">${esc(t.title)}</span></div>`;
+    ${mark}<span class="title">${esc(t.title)}</span>${removing ? `<span class="rmtag">uninstall</span>` : ""}</div>`;
 }
 
 function renderList() {
@@ -284,27 +312,44 @@ function renderDetail(t) {
   if (t.default) badges.push(`<span class="badge">essentials</span>`);
   if (t.gaming) badges.push(`<span class="badge">gaming</span>`);
   const native = sourceMap[t.id] === "native";
+  const removing = removeSet.has(t.id);
+  if (removing) badges.push(`<span class="badge high">✗ marked to uninstall</span>`);
+  const preview = removing ? t.undo_preview : t.preview;
+  const previewTitle = removing ? "What uninstalling will do" : "What will be done";
   $("detail").innerHTML = `<h2>${esc(t.title)}</h2>
     <div class="badges">${badges.join("")}</div>
     <p>${esc(t.summary)}</p>
-    ${t.dual ? `<div class="sourcepick">
+    ${t.dual && !removing ? `<div class="sourcepick">
       <span style="color:var(--muted)">Install as</span>
       <button type="button" id="src-flatpak" class="${native ? "" : "picked"}">Flatpak</button>
       <button type="button" id="src-native" class="${native ? "picked" : ""}">System package</button>
     </div>` : ""}
+    ${t.removable && t.applied === true ? `<div class="uninst">
+      <button type="button" id="btn-uninst" class="${removing ? "armed" : ""}"
+        title="Runs with the next Run, after the same plan-and-confirm step.">
+        ${removing ? "Keep it installed" : "Uninstall"}</button>
+    </div>` : ""}
     ${t.warning ? `<div class="warn">▲ ${esc(t.warning)}</div>` : ""}
     ${t.details.length ? `<ul>${t.details.map((d) => `<li>${esc(d)}</li>`).join("")}</ul>` : ""}
-    ${t.preview.length ? `<h3 style="font-size:13px">What will be done</h3>
-      <pre>${t.preview.map((c) => `<span>›</span> ${esc(c)}`).join("\n")}</pre>` : ""}`;
-  if (t.dual) {
+    ${preview.length ? `<h3 style="font-size:13px">${previewTitle}</h3>
+      <pre>${preview.map((c) => `<span>›</span> ${esc(c)}`).join("\n")}</pre>` : ""}`;
+  if (t.dual && !removing) {
     $("src-flatpak").onclick = () => { delete sourceMap[t.id]; renderDetail(t); };
     $("src-native").onclick = () => { sourceMap[t.id] = "native"; renderDetail(t); };
   }
+  const uninst = $("btn-uninst");
+  if (uninst) uninst.onclick = () => {
+    if (removeSet.has(t.id)) removeSet.delete(t.id);
+    else { removeSet.add(t.id); selected.delete(t.id); }
+    render();
+  };
 }
 
 function renderActions() {
-  $("btn-run").textContent = `Run ${selected.size}`;
-  $("btn-run").disabled = selected.size === 0;
+  const total = selected.size + removeSet.size;
+  $("btn-run").textContent = removeSet.size
+    ? `Run ${selected.size} + uninstall ${removeSet.size}` : `Run ${selected.size}`;
+  $("btn-run").disabled = total === 0;
   $("btn-dry").textContent = `Dry run: ${dryRun ? "on" : "OFF"}`;
   $("btn-dry").classList.toggle("off", !dryRun);
   const pendingDefaults = state.tasks.filter((t) => t.default && t.applied !== true).length;
@@ -358,10 +403,11 @@ function quickTour() {
 
 function openPlan() {
   const tasks = state.tasks.filter((t) => selected.has(t.id));
-  if (!tasks.length) return;
+  const removals = state.tasks.filter((t) => removeSet.has(t.id));
+  if (!tasks.length && !removals.length) return;
   const warnings = tasks.filter((t) => t.warning);
   const prompts = tasks.filter((t) => t.prompt);
-  let html = `<div class="dhead">Plan: ${tasks.length} tasks</div><div class="dbody">
+  let html = `<div class="dhead">Plan: ${tasks.length + removals.length} tasks</div><div class="dbody">
     <p class="${dryRun ? "" : "fail"}">${dryRun
       ? "Dry run: nothing will be changed."
       : "LIVE: the system will be changed."}</p>`;
@@ -388,6 +434,8 @@ function openPlan() {
           <button type="button" id="aur-go">Search</button>
         </div>
         <div id="aur-results"></div></div>` : "");
+  for (const t of removals)
+    html += `<h3 class="fail">Uninstall ${esc(t.title)}</h3><pre>${t.undo_preview.map(esc).join("\n")}</pre>`;
   html += `</div><div class="dfoot">
     <button id="p-cancel">Cancel</button>
     <button class="run" id="p-run">${dryRun ? "Dry run" : "Run"}</button></div>`;
@@ -402,7 +450,8 @@ function openPlan() {
     const response = await fetch(api("/api/run"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids: [...selected], dry_run: dryRun, inputs, sources: sourceMap }),
+      body: JSON.stringify({ ids: [...selected], remove: [...removeSet], dry_run: dryRun,
+        inputs, sources: sourceMap }),
     });
     const result = await response.json();
     if (result.error) { alert(result.error); return; }
@@ -500,6 +549,46 @@ function wireAurSearch() {
   };
 }
 
+/* -------------------------------------------------------------- restore */
+
+async function openRestore() {
+  const response = await fetch(api("/api/restore/sessions"));
+  const data = await response.json();
+  let html = `<div class="dhead">Restore a previous state</div><div class="dbody">
+    <p>Every run backs up the configuration files it changes. Restoring a
+    session puts those files back the way they were. Installed packages are
+    not touched; uninstall applications with the Uninstall button on the
+    application itself.</p>`;
+  if (!data.sessions?.length) {
+    html += `<p style="color:var(--muted)">No backup sessions yet. They appear
+      after the first run that changes a file.</p>`;
+  }
+  for (const s of data.sessions ?? []) {
+    html += `<div class="qrow">
+      <button type="button" class="restore-pick" data-name="${esc(s.name)}"
+        data-label="${esc(s.label)}">Restore</button>
+      <span>${esc(s.label)}</span>
+      <span class="why">${s.files.length} files: ${esc(s.files.slice(0, 4).join(", "))}${s.files.length > 4 ? ", ..." : ""}</span>
+    </div>`;
+  }
+  html += `</div><div class="dfoot"><button id="rst-close">Close</button></div>`;
+  $("dlg-restore").innerHTML = html;
+  $("dlg-restore").showModal();
+  $("rst-close").onclick = () => $("dlg-restore").close();
+  for (const btn of $("dlg-restore").querySelectorAll(".restore-pick"))
+    btn.onclick = async () => {
+      if (!confirm(`Put the files of ${btn.dataset.label} back the way they were?`)) return;
+      const result = await (await fetch(api("/api/restore"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session: btn.dataset.name }),
+      })).json();
+      if (result.error) { alert(result.error); return; }
+      $("dlg-restore").close();
+      startPolling();
+    };
+}
+
 function startPolling() {
   $("logwrap").classList.add("show");
   $("btn-abort").hidden = false;
@@ -529,9 +618,9 @@ async function poll() {
     $("run-progress").textContent = "";
     $("btn-abort").hidden = true;
     $("btn-log-hide").hidden = false;
-    for (const title of status.done) {
-      const task = state.tasks.find((t) => t.title === title);
-      if (task) selected.delete(task.id);
+    for (const id of status.done_ids ?? []) {
+      selected.delete(id);
+      if (!status.dry_run) removeSet.delete(id);
     }
     await load();
     summary(status);
@@ -572,9 +661,15 @@ $("btn-gaming").onclick = () => {
   selected = new Set(state.tasks.filter((t) => (t.default || t.gaming) && t.applied !== true).map((t) => t.id));
   render();
 };
-$("btn-none").onclick = () => { selected = new Set(); render(); };
+$("btn-none").onclick = () => { selected = new Set(); removeSet = new Set(); render(); };
+$("btn-restore").onclick = openRestore;
 $("btn-abort").onclick = () => fetch(api("/api/abort"), { method: "POST" });
 $("btn-log-hide").onclick = () => $("logwrap").classList.remove("show");
+if (!localStorage.getItem("uniscript-intro-seen")) $("intro").classList.add("show");
+$("intro-close").onclick = () => {
+  localStorage.setItem("uniscript-intro-seen", "1");
+  $("intro").classList.remove("show");
+};
 document.addEventListener("keydown", (event) => {
   if (event.key === "/" && document.activeElement !== $("search")) {
     event.preventDefault(); $("search").focus();

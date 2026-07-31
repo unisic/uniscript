@@ -25,7 +25,7 @@ from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
 from ..catalog import build_tasks, categories_of, quick_setup_ids
 from ..catalog.common import SourceInstall
-from ..core.backup import BackupStore
+from ..core.backup import BackupStore, list_restore_sessions
 from ..core.context import ExecContext
 from ..core.privileges import PrivilegeManager
 from ..core.probe import Probe
@@ -135,12 +135,17 @@ class RunManager:
     def running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
-    def start(self, tasks: list[Task], inputs: dict[str, str], dry_run: bool) -> str | None:
-        """Begin a run; returns an error message instead when it cannot."""
+    def start(
+        self, jobs: list[tuple[Task, bool]], inputs: dict[str, str], dry_run: bool
+    ) -> str | None:
+        """Begin a run of (task, uninstall) jobs; returns an error when it cannot."""
         with self._lock:
             if self.running:
                 return "A run is already in progress."
-            needs_root = any(task.requires_root() for task in tasks)
+            needs_root = any(
+                task.undo_requires_root() if uninstall else task.requires_root()
+                for task, uninstall in jobs
+            )
             privileges = self.server.privileges
             if needs_root and not dry_run and privileges.backend == "none":
                 return "No sudo, no doas and not root: system tasks cannot run."
@@ -159,9 +164,10 @@ class RunManager:
                 "phase": "running",
                 "dry_run": dry_run,
                 "index": 0,
-                "total": len(tasks),
+                "total": len(jobs),
                 "current": "",
                 "done": [],
+                "done_ids": [],
                 "failed": [],
                 "skipped": [],
                 "notes": [],
@@ -169,7 +175,7 @@ class RunManager:
                 "backups": "",
             }
             self._thread = threading.Thread(
-                target=self._worker, args=(tasks, inputs, dry_run), daemon=True
+                target=self._worker, args=(jobs, inputs, dry_run), daemon=True
             )
             self._thread.start()
             return None
@@ -180,9 +186,98 @@ class RunManager:
             self.log.append("warn", "aborting the current work")
             loop.call_soon_threadsafe(task.cancel)
 
-    def _worker(self, tasks: list[Task], inputs: dict[str, str], dry_run: bool) -> None:
+    def start_restore(self, label: str, script: Path, needs_root: bool) -> str | None:
+        """Run a session's restore.sh; returns an error message when it cannot."""
+        with self._lock:
+            if self.running:
+                return "A run is already in progress."
+            privileges = self.server.privileges
+            if needs_root and privileges.backend == "none" and not self.server.system.is_root:
+                return "No sudo, no doas and not root: the restore script cannot run."
+            self.status = {
+                "phase": "running",
+                "dry_run": False,
+                "index": 1,
+                "total": 1,
+                "current": f"Restore {label}",
+                "done": [],
+                "done_ids": [],
+                "failed": [],
+                "skipped": [],
+                "notes": [],
+                "reboot": False,
+                "backups": "",
+            }
+            self._thread = threading.Thread(
+                target=self._restore_worker, args=(label, script, needs_root), daemon=True
+            )
+            self._thread.start()
+            return None
+
+    def _restore_worker(self, label: str, script: Path, needs_root: bool) -> None:
         privileges = self.server.privileges
-        needs_root = any(task.requires_root() for task in tasks)
+        title = f"Restore {label}"
+        status = self.status
+        try:
+            # restore.sh calls sudo itself; prime the ticket first so it never
+            # has to prompt with its input tied to /dev/null.
+            if (
+                needs_root
+                and privileges.backend in {"sudo", "doas"}
+                and not asyncio.run(privileges.is_primed())
+            ):
+                if not sys.stdin.isatty():
+                    message = (
+                        "administrator privileges are not primed and there is no "
+                        "terminal to ask on; run sudo -v first"
+                    )
+                    status["failed"].append({"title": title, "error": message})
+                    self.log.append("error", message)
+                    return
+                status["phase"] = "priming"
+                self.log.append("warn", "Enter the administrator password in the terminal.")
+                print("\nuniscript needs administrator privileges.", flush=True)
+                if subprocess.call(privileges.interactive_prime_command()) != 0:
+                    status["failed"].append(
+                        {"title": title, "error": "no administrator privileges"}
+                    )
+                    self.log.append("error", "no privileges, aborting")
+                    return
+            status["phase"] = "running"
+            self.log.append("task", f"[1/1] {title}")
+            self.log.append("cmd", f"$ bash {script}")
+            process = subprocess.Popen(
+                ["bash", str(script)],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            if process.stdout is not None:
+                for line in process.stdout:
+                    self.log.append("out", line.rstrip())
+            code = process.wait()
+            if code == 0:
+                status["done"].append(title)
+                self.log.append("ok", f"done: {title}")
+            else:
+                status["failed"].append(
+                    {"title": title, "error": f"restore.sh exited with code {code}"}
+                )
+                self.log.append("error", f"restore.sh exited with code {code}")
+        finally:
+            self.server.probe.invalidate()
+            self.server.refresh_applied()
+            status["phase"] = "done"
+
+    def _worker(
+        self, jobs: list[tuple[Task, bool]], inputs: dict[str, str], dry_run: bool
+    ) -> None:
+        privileges = self.server.privileges
+        needs_root = any(
+            task.undo_requires_root() if uninstall else task.requires_root()
+            for task, uninstall in jobs
+        )
         keepalive = False
         try:
             if needs_root and not dry_run and privileges.backend in {"sudo", "doas"}:
@@ -195,7 +290,7 @@ class RunManager:
                         return
                 keepalive = True
             self.status["phase"] = "running"
-            asyncio.run(self._run(tasks, inputs, dry_run, keepalive))
+            asyncio.run(self._run(jobs, inputs, dry_run, keepalive))
         finally:
             self._loop = None
             self._task = None
@@ -205,7 +300,11 @@ class RunManager:
             self.status["phase"] = "done"
 
     async def _run(
-        self, tasks: list[Task], inputs: dict[str, str], dry_run: bool, keepalive: bool
+        self,
+        jobs: list[tuple[Task, bool]],
+        inputs: dict[str, str],
+        dry_run: bool,
+        keepalive: bool,
     ) -> None:
         self._loop = asyncio.get_running_loop()
         self._task = asyncio.current_task()
@@ -237,29 +336,37 @@ class RunManager:
         )
         status = self.status
         try:
-            for index, task in enumerate(tasks, start=1):
+            for index, (task, uninstall) in enumerate(jobs, start=1):
+                title = f"Uninstall {task.title}" if uninstall else task.title
                 status["index"] = index
-                status["current"] = task.title
-                self.log.append("task", f"[{index}/{len(tasks)}] {task.title}")
+                status["current"] = title
+                self.log.append("task", f"[{index}/{len(jobs)}] {title}")
                 try:
-                    await task.run(ctx)
+                    if uninstall:
+                        await task.run_undo(ctx)
+                    else:
+                        await task.run(ctx)
                 except asyncio.CancelledError:
-                    self.log.append("warn", f"aborted: {task.title}")
-                    status["skipped"] = [item.title for item in tasks[index - 1 :]]
+                    self.log.append("warn", f"aborted: {title}")
+                    status["skipped"] = [
+                        f"Uninstall {item.title}" if undo else item.title
+                        for item, undo in jobs[index - 1 :]
+                    ]
                     break
                 except CommandFailed as exc:
-                    status["failed"].append({"title": task.title, "error": str(exc)})
-                    self.log.append("error", f"failed: {task.title}")
+                    status["failed"].append({"title": title, "error": str(exc)})
+                    self.log.append("error", f"failed: {title}")
                     for line in exc.tail[-10:]:
                         self.log.append("error", f"  {line}")
                 except Exception as exc:  # one task must not take the run down
                     status["failed"].append(
-                        {"title": task.title, "error": f"{type(exc).__name__}: {exc}"}
+                        {"title": title, "error": f"{type(exc).__name__}: {exc}"}
                     )
-                    self.log.append("error", f"failed: {task.title}: {exc}")
+                    self.log.append("error", f"failed: {title}: {exc}")
                 else:
-                    status["done"].append(task.title)
-                    self.log.append("ok", f"done: {task.title}")
+                    status["done"].append(title)
+                    status["done_ids"].append(task.id)
+                    self.log.append("ok", f"done: {title}")
         finally:
             status["notes"] = list(ctx.notes)
             status["reboot"] = ctx.reboot_required
@@ -273,6 +380,7 @@ class GuiServer:
         self.probe = Probe(system)
         self.privileges = PrivilegeManager(system)
         self.backups = BackupStore(backup_root)
+        self.backup_root = backup_root
         self.dry_run = dry_run
         self.tasks: list[Task] = build_tasks(system)
         self.applied: dict[str, bool | None] = {}
@@ -327,6 +435,8 @@ class GuiServer:
                     "warning": task.warning,
                     "details": task.details,
                     "dual": any(isinstance(step, SourceInstall) for step in task.steps),
+                    "removable": task.removable,
+                    "undo_preview": task.undo_preview(self.system),
                     "preview": task.preview(self.system),
                     "prompt": (
                         {
@@ -344,12 +454,17 @@ class GuiServer:
 
     def start_run(self, payload: dict) -> str | None:
         ids = payload.get("ids")
-        if not isinstance(ids, list) or not ids:
+        remove_ids = payload.get("remove")
+        if not isinstance(ids, list):
+            ids = []
+        if not isinstance(remove_ids, list):
+            remove_ids = []
+        if not ids and not remove_ids:
             return "No task is selected."
         dry_run = bool(payload.get("dry_run"))
         raw_inputs = payload.get("inputs") or {}
         sources = payload.get("sources") or {}
-        chosen: list[Task] = []
+        jobs: list[tuple[Task, bool]] = []
         inputs: dict[str, str] = {}
         for task in self.tasks:  # catalogue order, like the TUI
             if task.id not in ids:
@@ -364,10 +479,23 @@ class GuiServer:
                 isinstance(step, SourceInstall) for step in task.steps
             ):
                 inputs[task.id] = "native"
-            chosen.append(task)
-        if not chosen:
+            jobs.append((task, False))
+        # Uninstalls run after the installs, the same order the TUI uses.
+        for task in self.tasks:
+            if task.id in remove_ids and task.removable:
+                jobs.append((task, True))
+        if not jobs:
             return "None of the requested tasks exist."
-        return self.run_manager.start(chosen, inputs, dry_run)
+        return self.run_manager.start(jobs, inputs, dry_run)
+
+    def start_restore(self, payload: dict) -> str | None:
+        name = str(payload.get("session") or "")
+        session = next(
+            (s for s in list_restore_sessions(self.backup_root) if s.name == name), None
+        )
+        if session is None:
+            return "Unknown backup session."
+        return self.run_manager.start_restore(session.label, session.script, session.needs_root)
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -420,6 +548,15 @@ class _Handler(BaseHTTPRequestHandler):
                     (query.get("project") or [""])[0].strip(),
                 )
             )
+        elif url.path == "/api/restore/sessions":
+            sessions = list_restore_sessions(self.gui.backup_root)
+            self._send_json(
+                {
+                    "sessions": [
+                        {"name": s.name, "label": s.label, "files": s.files} for s in sessions
+                    ]
+                }
+            )
         else:
             self._send(404, b"not found", "text/plain")
 
@@ -436,6 +573,9 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if url.path == "/api/run":
             error = self.gui.start_run(payload)
+            self._send_json({"error": error} if error else {"ok": True})
+        elif url.path == "/api/restore":
+            error = self.gui.start_restore(payload)
             self._send_json({"error": error} if error else {"ok": True})
         elif url.path == "/api/abort":
             self.gui.run_manager.abort()
