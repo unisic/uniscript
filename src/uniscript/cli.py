@@ -96,6 +96,10 @@ def _input_probe() -> int:
         return 1
     print("Move the mouse, click and scroll inside this window.")
     print("Mouse events look like \\x1b[<0;12;5M. Press q to finish.\n")
+    # A terminal under test may repaint over the lines faster than anyone can
+    # read them; the raw bytes in a file outlive the window.
+    log_path = os.environ.get("UNISCRIPT_PROBE_LOG")
+    log = open(log_path, "ab") if log_path else None
     old = termios.tcgetattr(fd)
     # Click, any-motion and SGR extended reporting, the same set Textual asks for.
     sys.stdout.write("\x1b[?1000h\x1b[?1003h\x1b[?1006h")
@@ -111,6 +115,9 @@ def _input_probe() -> int:
             data = os.read(fd, 1024)
             if not data:
                 break
+            if log is not None:
+                log.write(data)
+                log.flush()
             if b"q" in data and b"\x1b[<" not in data:
                 break
             shown = repr(data)[2:-1]
@@ -121,6 +128,8 @@ def _input_probe() -> int:
                 keys += 1
                 print(f"key:   {shown}\r")
     finally:
+        if log is not None:
+            log.close()
         sys.stdout.write("\x1b[?1003l\x1b[?1000l\x1b[?1006l")
         sys.stdout.flush()
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
