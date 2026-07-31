@@ -24,6 +24,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
 from ..catalog import build_tasks, categories_of, quick_setup_ids
+from ..catalog.common import SourceInstall
 from ..core.backup import BackupStore
 from ..core.context import ExecContext
 from ..core.privileges import PrivilegeManager
@@ -325,6 +326,7 @@ class GuiServer:
                     "reboot": task.reboot,
                     "warning": task.warning,
                     "details": task.details,
+                    "dual": any(isinstance(step, SourceInstall) for step in task.steps),
                     "preview": task.preview(self.system),
                     "prompt": (
                         {
@@ -346,6 +348,7 @@ class GuiServer:
             return "No task is selected."
         dry_run = bool(payload.get("dry_run"))
         raw_inputs = payload.get("inputs") or {}
+        sources = payload.get("sources") or {}
         chosen: list[Task] = []
         inputs: dict[str, str] = {}
         for task in self.tasks:  # catalogue order, like the TUI
@@ -357,6 +360,10 @@ class GuiServer:
                 if error:
                     return f"{task.title}: {error}"
                 inputs[task.id] = value
+            if sources.get(task.id) == "native" and any(
+                isinstance(step, SourceInstall) for step in task.steps
+            ):
+                inputs[task.id] = "native"
             chosen.append(task)
         if not chosen:
             return "None of the requested tasks exist."

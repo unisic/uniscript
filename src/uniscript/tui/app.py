@@ -33,6 +33,7 @@ from textual.widgets.option_list import Option, OptionDoesNotExist
 from textual.widgets.selection_list import Selection
 
 from ..catalog import build_tasks, categories_of
+from ..catalog.common import SourceInstall
 from ..core.backup import BackupStore
 from ..core.context import ExecContext
 from ..core.privileges import PrivilegeManager
@@ -236,6 +237,7 @@ class UniscriptApp(App[None]):
         Binding("a", "select_category", "Select the whole group", show=False),
         Binding("n", "clear_selection", "Deselect everything", show=False),
         Binding("d", "toggle_dry_run", "Dry run", show=False),
+        Binding("f", "toggle_source", "Flatpak or system package", show=False),
         Binding("s", "show_system", "System", show=False),
         Binding("t", "switch_palette", "Light or dark palette", show=False),
         Binding("shift+down", "scroll_detail(1)", "Scroll the description", show=False),
@@ -268,6 +270,8 @@ class UniscriptApp(App[None]):
         self._query = ""
         self._active_category: Category | None = self.categories[0] if self.categories else None
         self._subcategory: str | None = None
+        # Tasks whose install the user switched from Flatpak to the system package.
+        self._native_ids: set[str] = set()
         self._syncing = False
         self._busy = False
         # Before compose: the stylesheet uses variables these themes define.
@@ -424,6 +428,10 @@ class UniscriptApp(App[None]):
             return None
         return task.category, task.subcategory
 
+    @staticmethod
+    def _dual_source(task: Task) -> bool:
+        return any(isinstance(step, SourceInstall) for step in task.steps)
+
     def _task_prompt(self, task: Task) -> str:
         # One-character flags keep the titles in a straight column; the legend
         # sits under the description panel and in the help.
@@ -439,6 +447,8 @@ class UniscriptApp(App[None]):
         title = escape(task.title)
         if applied:
             title = f"[$text-muted]{title}[/]"
+        if task.id in self._native_ids:
+            title += "  [$text-muted]· system package[/]"
         return f"{marker} {title}"
 
     def _search_entries(self) -> list[Selection[str]]:
@@ -595,6 +605,9 @@ class UniscriptApp(App[None]):
             badges.append("[$text-muted]essentials[/]")
         if "gaming" in task.tags:
             badges.append("[$text-muted]gaming[/]")
+        if self._dual_source(task):
+            source = "system package" if task.id in self._native_ids else "Flatpak"
+            badges.append(f"[$text-accent]source: {source}, f switches[/]")
         lines.append("[$text-muted]  ·  [/]".join(badges))
         lines.append("")
         lines.append(escape(task.summary))
@@ -905,6 +918,17 @@ class UniscriptApp(App[None]):
         self._refresh_status()
         self._log("info", "dry run enabled" if self.dry_run else "live mode enabled")
 
+    def action_toggle_source(self) -> None:
+        value = self.query_one("#tasks", TaskList)._highlighted_value()
+        task = self._task_by_id(value) if value else None
+        if task is None or not self._dual_source(task):
+            return
+        if task.id in self._native_ids:
+            self._native_ids.discard(task.id)
+        else:
+            self._native_ids.add(task.id)
+        self._refresh_task_list()
+
     def action_toggle_console(self) -> None:
         console = self.query_one("#console", Vertical)
         console.display = not console.display
@@ -1013,6 +1037,11 @@ class UniscriptApp(App[None]):
         if not planned:
             self._log("warn", "nothing left to do")
             return
+        # The source switches ride in the same inputs channel the prompts use;
+        # dual-source tasks never have a prompt, so the keys cannot collide.
+        for task in planned:
+            if task.id in self._native_ids:
+                inputs[task.id] = "native"
 
         confirmed = await self.push_screen_wait(PlanScreen(planned, self.system, self.dry_run))
         if not confirmed:

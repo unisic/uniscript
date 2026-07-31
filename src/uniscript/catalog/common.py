@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from ..core.context import ExecContext
@@ -1061,6 +1062,82 @@ def _shell_tasks(system: System) -> list[Task]:
 # ----------------------------------------------------------- Applications
 
 
+@dataclass
+class SourceInstall(Step):
+    """Install from Flathub by default, or from the system repositories.
+
+    The per-task choice arrives through ctx.inputs ("native" switches to the
+    system package): the f key in the TUI, the source toggle in the GUI, or
+    --input <task-id>=native without an interface.
+    """
+
+    flatpak_id: str
+    packages: list[str]
+
+    def __post_init__(self) -> None:
+        self._flatpak = _flatpak_install([self.flatpak_id])
+        self._native = Install(self.packages)
+
+    def preview(self, system: System) -> list[str]:
+        native = " ".join(self._native.preview(system))
+        return [
+            *self._flatpak.preview(system),
+            f"or as a system package: {native}",
+        ]
+
+    async def run(self, ctx: ExecContext) -> None:
+        if ctx.inputs.get(ctx.current_task_id) == "native":
+            await self._native.run(ctx)
+        else:
+            await self._flatpak.run(ctx)
+
+
+def _native_app_packages(system: System) -> dict[str, list[str]]:
+    """The system-repository names for the apps that exist outside Flathub.
+
+    Same-name entries are verified across Fedora, Debian, Ubuntu, Arch and
+    openSUSE (Repology); the rest differ per family or are missing from some
+    (HandBrake needs RPM Fusion on Fedora, the Ubuntu Thunderbird deb is a
+    snap shim, so those families are left out).
+    """
+    same = [
+        ("apps-vlc", "vlc"),
+        ("apps-gimp", "gimp"),
+        ("apps-inkscape", "inkscape"),
+        ("apps-krita", "krita"),
+        ("apps-blender", "blender"),
+        ("apps-audacity", "audacity"),
+        ("apps-kdenlive", "kdenlive"),
+        ("apps-mpv", "mpv"),
+        ("apps-qbittorrent", "qbittorrent"),
+        ("apps-keepassxc", "keepassxc"),
+        ("apps-flameshot", "flameshot"),
+        ("apps-meld", "meld"),
+        ("apps-darktable", "darktable"),
+        ("apps-obs", "obs-studio"),
+    ]
+    mapping = {task_id: [name] for task_id, name in same}
+    mapping["apps-libreoffice"] = by_family(
+        system,
+        rhel=["libreoffice"],
+        debian=["libreoffice"],
+        arch=["libreoffice-fresh"],
+        suse=["libreoffice"],
+    )
+    mapping["apps-thunderbird"] = by_family(
+        system,
+        rhel=["thunderbird"],
+        arch=["thunderbird"],
+        suse=["MozillaThunderbird"],
+    )
+    mapping["apps-handbrake"] = by_family(
+        system,
+        debian=["handbrake"],
+        arch=["handbrake"],
+    )
+    return {task_id: names for task_id, names in mapping.items() if names}
+
+
 def _app_tasks(system: System) -> list[Task]:
     # Each application is its own task inside a subcategory, so the interface
     # can browse Applications the way linutil browses applications-setup:
@@ -1530,8 +1607,25 @@ def _app_tasks(system: System) -> list[Task]:
     ]
 
     tasks: list[Task] = []
+    natives = _native_app_packages(system)
     for subcategory, apps in groups:
         for task_id, title, app_id, summary, details in apps:
+            native = natives.get(task_id)
+            if native:
+                steps: list[Step] = [SourceInstall(app_id, native)]
+                extra = [
+                    "Source: Flathub, or the system repositories "
+                    f"({' '.join(native)}) when you switch the source.",
+                    f"Application id: {app_id}",
+                ]
+                detect = (
+                    lambda app, names: lambda probe, sys_: probe.has_flatpak_app(app)
+                    or probe.has_any_package(*names)
+                )(app_id, native)
+            else:
+                steps = [_flatpak_install([app_id])]
+                extra = ["Source: Flathub.", f"Application id: {app_id}"]
+                detect = (lambda app: lambda probe, sys_: probe.has_flatpak_app(app))(app_id)
             tasks.append(
                 Task(
                     id=task_id,
@@ -1540,9 +1634,9 @@ def _app_tasks(system: System) -> list[Task]:
                     category=Category.APPS,
                     subcategory=subcategory,
                     risk=Risk.SAFE,
-                    details=[*details, "Source: Flathub.", f"Application id: {app_id}"],
-                    steps=[_flatpak_install([app_id])],
-                    detect=(lambda app: lambda probe, sys_: probe.has_flatpak_app(app))(app_id),
+                    details=[*details, *extra],
+                    steps=steps,
+                    detect=detect,
                 )
             )
     tasks.append(_helium_task(system))

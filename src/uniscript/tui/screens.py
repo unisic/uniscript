@@ -250,6 +250,8 @@ class HelpScreen(ModalScreen[None]):
   [$accent]left[/]            back out of a group, then to the category list
   [$accent]space[/]           select or deselect a task
   [$accent]/[/]               search everywhere, escape clears it
+  [$accent]f[/]               switch an application between Flatpak and the
+                  system package (where both exist)
   [$accent]shift+arrows[/]    scroll the description (the wheel works too)
   [$accent]s[/]               details of the detected system
   [$accent]t[/]               switch between the dark and the light palette

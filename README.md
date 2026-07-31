@@ -59,6 +59,7 @@ switches between the dark and the day variant.
 | arrows | move; right/enter opens a group, left backs out to the categories |
 | space, `a`, `n` | select a task, the whole group, nothing |
 | `/` | search everywhere, `esc` clears it |
+| `f` | switch an application between Flatpak and the system package |
 | `e`, `g` | the essentials or the gaming preset |
 | `r`, `d` | show the plan and run; toggle dry run |
 | shift+arrows | scroll the description |
@@ -94,7 +95,9 @@ About 140 tasks; only those matching the machine are shown. On the test
 machine that is 104 on Fedora, 101 on Ubuntu, 100 on Arch and 95 on openSUSE;
 `--list` prints the exact set for yours. Shared across families: Flatpak and
 Flathub, applications one per task in groups (including Helium from the
-developers' own repo or AppImage), the gaming stack, kernel and IO tuning,
+developers' own repo or AppImage; where an app also lives in the system
+repositories, each install can be switched between Flatpak and the native
+package), the gaming stack, kernel and IO tuning,
 zram, encrypted DNS, firewall, package and Flatpak maintenance, shells. Per
 family: RPM Fusion, Terra, the NVIDIA driver and COPR with search and installs
 on Fedora; PPAs with installs, Firefox from Mozilla instead of the snap,

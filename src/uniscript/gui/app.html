@@ -86,6 +86,9 @@
   aside .badge.high { color: var(--red); }
   aside .warn { border-left: 3px solid var(--amber); padding: 4px 10px;
     margin: 10px 0; color: var(--amber); background: var(--panel); border-radius: 0 6px 6px 0; }
+  aside .sourcepick { display: flex; gap: 8px; align-items: center; margin: 10px 0; }
+  aside .sourcepick button { padding: 3px 12px; }
+  aside .sourcepick button.picked { background: var(--blue); color: var(--bg); font-weight: 600; }
   aside ul { margin: 8px 0; padding-left: 18px; }
   aside pre { background: var(--bg); border: 1px solid var(--panel-2);
     border-radius: 6px; padding: 8px 10px; overflow-x: auto; font-size: 12.5px; }
@@ -184,6 +187,7 @@ let selected = new Set();
 let activeCategory = null;
 let currentTask = null;
 let dryRun = true;
+const sourceMap = {};  // task id -> "native" for apps switched off Flatpak
 let logIndex = 0;
 let polling = null;
 let detectTimer = null;
@@ -279,13 +283,23 @@ function renderDetail(t) {
   if (t.reboot) badges.push(`<span class="badge med">needs a reboot</span>`);
   if (t.default) badges.push(`<span class="badge">essentials</span>`);
   if (t.gaming) badges.push(`<span class="badge">gaming</span>`);
+  const native = sourceMap[t.id] === "native";
   $("detail").innerHTML = `<h2>${esc(t.title)}</h2>
     <div class="badges">${badges.join("")}</div>
     <p>${esc(t.summary)}</p>
+    ${t.dual ? `<div class="sourcepick">
+      <span style="color:var(--muted)">Install as</span>
+      <button type="button" id="src-flatpak" class="${native ? "" : "picked"}">Flatpak</button>
+      <button type="button" id="src-native" class="${native ? "picked" : ""}">System package</button>
+    </div>` : ""}
     ${t.warning ? `<div class="warn">▲ ${esc(t.warning)}</div>` : ""}
     ${t.details.length ? `<ul>${t.details.map((d) => `<li>${esc(d)}</li>`).join("")}</ul>` : ""}
     ${t.preview.length ? `<h3 style="font-size:13px">What will be done</h3>
       <pre>${t.preview.map((c) => `<span>›</span> ${esc(c)}`).join("\n")}</pre>` : ""}`;
+  if (t.dual) {
+    $("src-flatpak").onclick = () => { delete sourceMap[t.id]; renderDetail(t); };
+    $("src-native").onclick = () => { sourceMap[t.id] = "native"; renderDetail(t); };
+  }
 }
 
 function renderActions() {
@@ -388,7 +402,7 @@ function openPlan() {
     const response = await fetch(api("/api/run"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids: [...selected], dry_run: dryRun, inputs }),
+      body: JSON.stringify({ ids: [...selected], dry_run: dryRun, inputs, sources: sourceMap }),
     });
     const result = await response.json();
     if (result.error) { alert(result.error); return; }
