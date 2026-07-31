@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import shlex
 import subprocess
 from pathlib import Path
@@ -307,6 +308,10 @@ class UniscriptApp(App[None]):
         self.query_one("#tasks", TaskList).focus()
         self._refresh_task_list()
         self._refresh_status()
+        if os.environ.get("UNISCRIPT_DEBUG_FOCUS"):
+            # Live view of who owns the keyboard, in the corner the brand
+            # occupies; for chasing focus reports from a terminal.
+            self.set_interval(0.5, self._debug_focus)
         self._log("info", f"uniscript: detected {self.system.pretty_name}")
         if self.privileges.backend == "none":
             self._log(
@@ -314,6 +319,13 @@ class UniscriptApp(App[None]):
                 "No sudo, no doas and not root. System tasks will not work.",
             )
         self._detect_applied()
+
+    def _debug_focus(self) -> None:
+        focused = self.screen.focused
+        name = f"{type(focused).__name__}#{focused.id}" if focused is not None else "None"
+        self.query_one("#brand", Label).update(
+            f"focus={name} app={'on' if self.app_focus else 'OFF'}"
+        )
 
     # --- detected task state --------------------------------------------------
 
@@ -580,6 +592,19 @@ class UniscriptApp(App[None]):
         self.action_preset_gaming()
 
     def on_key(self, event: events.Key) -> None:
+        # A focus-out from the terminal makes Textual drop the focus, and if
+        # the matching focus-in never arrives the keyboard stays dead. Any key
+        # that reaches the app with nothing focused puts the list back in
+        # charge and then runs normally, so one lost handshake costs nothing.
+        if self.screen.focused is None and not self._busy:
+            self.query_one("#tasks", TaskList).focus()
+            key = event.key
+            event.stop()
+            # Without this the app's own binding for the key would fire here
+            # AND from the simulation below, so a toggle would toggle twice.
+            event.prevent_default()
+            self.call_later(self.simulate_key, key)
+            return
         # Arrows in the filter field jump to the list, so typing a filter and
         # moving through the matches is one motion without enter in between.
         search = self.query_one("#search", Input)
