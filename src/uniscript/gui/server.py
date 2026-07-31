@@ -15,11 +15,13 @@ import shlex
 import subprocess
 import sys
 import threading
+import urllib.error
+import urllib.request
 import webbrowser
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 from ..catalog import build_tasks, categories_of, quick_setup_ids
 from ..core.backup import BackupStore
@@ -31,6 +33,45 @@ from ..core.system import System, detect_system
 from ..core.tasks import Task
 
 LOG_MAX_LINES = 5000
+
+COPR_API = "https://copr.fedorainfracloud.org/api_3"
+
+
+def _copr_get(path: str, params: dict[str, str]) -> dict:
+    """One bounded request to the public COPR API, errors become JSON."""
+    url = f"{COPR_API}/{path}?{urlencode(params)}"
+    try:
+        # The search endpoint routinely needs more than ten seconds.
+        with urllib.request.urlopen(url, timeout=25) as response:
+            return json.load(response)
+    except (urllib.error.URLError, TimeoutError, ValueError) as exc:
+        return {"error": f"COPR did not answer: {exc}"}
+
+
+def _copr_search(query: str) -> dict:
+    if not query:
+        return {"items": []}
+    data = _copr_get("project/search", {"query": query})
+    if "error" in data:
+        return data
+    return {
+        "items": [
+            {
+                "full_name": item.get("full_name", ""),
+                "description": (item.get("description") or "").strip()[:120],
+            }
+            for item in data.get("items", [])[:15]
+        ]
+    }
+
+
+def _copr_packages(owner: str, project: str) -> dict:
+    if not owner or not project:
+        return {"items": []}
+    data = _copr_get("package/list/", {"ownername": owner, "projectname": project})
+    if "error" in data:
+        return data
+    return {"items": [item.get("name", "") for item in data.get("items", [])[:100]]}
 
 
 class LogRing:
@@ -337,6 +378,15 @@ class _Handler(BaseHTTPRequestHandler):
             lines, next_index = self.gui.run_manager.log.since(since)
             self._send_json(
                 {"lines": lines, "next": next_index, "status": self.gui.run_manager.status}
+            )
+        elif url.path == "/api/copr/search":
+            self._send_json(_copr_search((query.get("q") or [""])[0].strip()))
+        elif url.path == "/api/copr/packages":
+            self._send_json(
+                _copr_packages(
+                    (query.get("owner") or [""])[0].strip(),
+                    (query.get("project") or [""])[0].strip(),
+                )
             )
         else:
             self._send(404, b"not found", "text/plain")

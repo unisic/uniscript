@@ -126,6 +126,12 @@
     font-size: 12px; overflow-x: auto; }
   dialog .fail { color: var(--red); } dialog .good { color: var(--green); }
   dialog label { display: block; margin: 8px 0 2px; color: var(--muted); }
+  dialog .coprbox { margin-top: 8px; }
+  dialog .coprbox .qbar { display: flex; gap: 8px; }
+  dialog .coprbox .qbar input { flex: 1; }
+  #copr-results { margin-top: 6px; max-height: 170px; overflow: auto; }
+  #copr-results .chip { padding: 1px 10px; border-radius: 999px; margin: 2px 4px 2px 0; }
+  #copr-results .chip.picked { background: var(--blue); color: var(--bg); }
 </style>
 </head>
 <body>
@@ -353,12 +359,20 @@ function openPlan() {
     html += `<h3>${esc(t.title)}</h3><pre>${t.preview.map(esc).join("\n")}</pre>` +
       (t.prompt ? `<label for="in-${t.id}">${esc(t.prompt.label)}</label>
         <input type="text" id="in-${t.id}" value="${esc(t.prompt.default)}"
-          placeholder="${esc(t.prompt.placeholder)}">` : "");
+          placeholder="${esc(t.prompt.placeholder)}">` : "") +
+      (t.id === "fedora-copr" ? `<div class="coprbox">
+        <label for="copr-q">Search COPR</label>
+        <div class="qbar">
+          <input type="search" id="copr-q" placeholder="project or package name">
+          <button type="button" id="copr-go">Search</button>
+        </div>
+        <div id="copr-results"></div></div>` : "");
   html += `</div><div class="dfoot">
     <button id="p-cancel">Cancel</button>
     <button class="run" id="p-run">${dryRun ? "Dry run" : "Run"}</button></div>`;
   $("dlg-plan").innerHTML = html;
   $("dlg-plan").showModal();
+  wireCoprSearch();
   $("p-cancel").onclick = () => $("dlg-plan").close();
   $("p-run").onclick = async () => {
     const inputs = {};
@@ -372,6 +386,58 @@ function openPlan() {
     if (result.error) { alert(result.error); return; }
     $("dlg-plan").close();
     startPolling();
+  };
+}
+
+function wireCoprSearch() {
+  const go = $("copr-go");
+  if (!go) return;
+  const input = $("in-fedora-copr");
+  const results = $("copr-results");
+  const muted = (text) => { results.innerHTML = `<span style="color:var(--muted)">${esc(text)}</span>`; };
+  const tokens = () => input.value.split(/[\s,]+/).filter(Boolean);
+  const showPackages = async (fullName) => {
+    const [owner, project] = fullName.split("/");
+    muted("loading the package list...");
+    const response = await fetch(api(`/api/copr/packages?owner=${encodeURIComponent(owner)}&project=${encodeURIComponent(project)}`));
+    const data = await response.json();
+    if (data.error) { results.innerHTML = `<span class="fail">${esc(data.error)}</span>`; return; }
+    if (!data.items.length) { muted("this project lists no packages; add names by hand"); return; }
+    results.innerHTML = `<span style="color:var(--muted)">click a package to add or remove it:</span><br>` +
+      data.items.map((n) => `<button type="button" class="chip" data-pkg="${esc(n)}">${esc(n)}</button>`).join("");
+    const repaint = () => { for (const chip of results.querySelectorAll(".chip"))
+      chip.classList.toggle("picked", tokens().includes(chip.dataset.pkg)); };
+    for (const chip of results.querySelectorAll(".chip"))
+      chip.onclick = () => {
+        const pkg = chip.dataset.pkg;
+        const current = tokens();
+        input.value = (current.includes(pkg)
+          ? current.filter((x) => x !== pkg)
+          : [...current, pkg]).join(" ");
+        repaint();
+      };
+    repaint();
+  };
+  const search = async () => {
+    const query = $("copr-q").value.trim();
+    if (!query) return;
+    muted("searching...");
+    const response = await fetch(api("/api/copr/search?q=" + encodeURIComponent(query)));
+    const data = await response.json();
+    if (data.error) { results.innerHTML = `<span class="fail">${esc(data.error)}</span>`; return; }
+    if (!data.items.length) { muted("nothing found"); return; }
+    results.innerHTML = data.items.map((p) =>
+      `<div class="qrow"><button type="button" class="copr-pick" data-name="${esc(p.full_name)}">use</button>
+       <span>${esc(p.full_name)}</span><span class="why">${esc(p.description)}</span></div>`).join("");
+    for (const btn of results.querySelectorAll(".copr-pick"))
+      btn.onclick = () => {
+        input.value = btn.dataset.name;
+        showPackages(btn.dataset.name);
+      };
+  };
+  go.onclick = search;
+  $("copr-q").onkeydown = (event) => {
+    if (event.key === "Enter") { event.preventDefault(); search(); }
   };
 }
 

@@ -361,6 +361,13 @@ def main(argv: list[str] | None = None) -> int:
             for task_id in missing_inputs:
                 print(f"task {task_id} needs --input {task_id}=VALUE", file=sys.stderr)
             return 1
+        for task in chosen:
+            if task.prompt is None or task.id not in inputs:
+                continue
+            error = task.prompt.validate(inputs[task.id])
+            if error:
+                print(f"bad --input for {task.id}: {error}", file=sys.stderr)
+                return 1
         if not args.dry_run and not args.yes:
             print("The following tasks will run:")
             for task in chosen:

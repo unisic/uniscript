@@ -112,8 +112,19 @@ async def _enable_copr(ctx: ExecContext) -> None:
     if not value:
         ctx.log("no repository name was given", "warn")
         return
-    for repo in value.replace(",", " ").split():
+    # Tokens with a slash are owner/project repositories, the rest are the
+    # packages to install once every repository is enabled.
+    tokens = value.replace(",", " ").split()
+    repos = [token for token in tokens if "/" in token]
+    packages = [token for token in tokens if "/" not in token]
+    for repo in repos:
         await ctx.run(["dnf", "-y", "copr", "enable", repo], root=True)
+    if packages:
+        await ctx.run(
+            ["dnf", "install", "-y", *packages],
+            root=True,
+            timeout=min(3600.0, 600.0 + 60.0 * len(packages)),
+        )
 
 
 async def _remove_old_kernels(ctx: ExecContext) -> None:
@@ -359,8 +370,8 @@ def build(system: System) -> list[Task]:
         ),
         Task(
             id="fedora-copr",
-            title="Enable a COPR repository",
-            summary="Adds the COPR repository you name, for example user/project.",
+            title="Enable a COPR repository and install from it",
+            summary="Adds the COPR repositories you name and installs the packages you list.",
             category=Category.REPOS,
             risk=Risk.MEDIUM,
             warning=(
@@ -368,16 +379,20 @@ def build(system: System) -> list[Task]:
                 "repositories whose owner you trust."
             ),
             details=[
-                "Format: owner/project. Separate several repositories with a space or a comma.",
+                "Entries with a slash are repositories (owner/project), the rest are "
+                "package names installed after the repositories are enabled.",
+                "Example: atim/starship starship enables the repository and installs "
+                "the starship package in one go.",
+                "The browser GUI can search COPR and list a project's packages.",
                 "List the enabled ones: dnf copr list. Disable: dnf copr disable owner/project.",
             ],
             prompt=InputPrompt(
-                label="COPR repositories (owner/project)",
-                placeholder="for example atim/starship solopasha/hyprland",
+                label="COPR repositories (owner/project) and packages to install",
+                placeholder="for example atim/starship starship",
                 validator=lambda value: (
                     None
-                    if all("/" in part for part in value.replace(",", " ").split())
-                    else "Every entry has to look like owner/project."
+                    if any("/" in part for part in value.replace(",", " ").split())
+                    else "At least one entry has to look like owner/project."
                 ),
             ),
             steps=[
@@ -387,7 +402,10 @@ def build(system: System) -> list[Task]:
                     else ["dnf-plugins-core"],
                     optional=True,
                 ),
-                Custom("enables the COPR repositories you named", _enable_copr),
+                Custom(
+                    "enables the COPR repositories you named and installs the packages",
+                    _enable_copr,
+                ),
             ],
         ),
         Task(
