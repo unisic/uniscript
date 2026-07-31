@@ -225,7 +225,7 @@ Screen {
 
 /* Okna modalne */
 
-PlanScreen, PromptScreen, SummaryScreen, SystemScreen, HelpScreen {
+PlanScreen, PromptScreen, SummaryScreen, SystemScreen, HelpScreen, RestoreScreen, WelcomeScreen {
     align: center middle;
     background: $background 60%;
 }
@@ -295,5 +295,66 @@ PlanScreen, PromptScreen, SummaryScreen, SystemScreen, HelpScreen {
 }
 
 #summary-dialog Button, #system-dialog Button, #help-dialog Button {
+    width: 100%;
+}
+
+#restore-dialog {
+    width: 90;
+    max-width: 90%;
+    height: 30;
+    max-height: 90%;
+    background: $surface;
+    border: round $accent;
+    padding: 1 2;
+}
+
+#restore-title {
+    text-style: bold;
+    color: $text-accent;
+    width: 100%;
+}
+
+#restore-intro {
+    color: $text-muted;
+    width: 100%;
+    margin-bottom: 1;
+}
+
+#restore-sessions {
+    height: 8;
+    border: round $panel;
+    margin-bottom: 1;
+}
+
+#restore-files {
+    height: 1fr;
+    border: round $panel;
+    padding: 0 1;
+    margin-bottom: 1;
+}
+
+#restore-buttons {
+    height: auto;
+    align-horizontal: right;
+}
+
+#restore-buttons Button {
+    margin-left: 2;
+}
+
+#welcome-dialog {
+    width: 62;
+    max-width: 90%;
+    height: auto;
+    background: $surface;
+    border: round $accent;
+    padding: 1 2;
+}
+
+#welcome-content {
+    margin-bottom: 1;
+}
+
+#welcome-dialog Button {
     width: 100%;
 }

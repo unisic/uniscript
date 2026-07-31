@@ -8,8 +8,10 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.markup import escape
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, Static
+from textual.widgets import Button, Input, Label, OptionList, Static
+from textual.widgets.option_list import Option
 
+from ..core.backup import RestoreSession
 from ..core.system import System
 from ..core.tasks import InputPrompt, Risk, Task
 
@@ -22,11 +24,18 @@ class PlanScreen(ModalScreen[bool]):
         Binding("enter", "confirm", "Run", priority=True),
     ]
 
-    def __init__(self, tasks: list[Task], system: System, dry_run: bool) -> None:
+    def __init__(
+        self,
+        tasks: list[Task],
+        system: System,
+        dry_run: bool,
+        removals: list[Task] | None = None,
+    ) -> None:
         super().__init__()
         self.tasks = tasks
         self.system = system
         self.dry_run = dry_run
+        self.removals = removals or []
 
     def compose(self) -> ComposeResult:
         with Vertical(id="plan-dialog"):
@@ -35,7 +44,7 @@ class PlanScreen(ModalScreen[bool]):
                 if self.dry_run
                 else "LIVE, the system will be changed"
             )
-            yield Label(f"Plan: {len(self.tasks)} tasks", id="plan-title")
+            yield Label(f"Plan: {len(self.tasks) + len(self.removals)} tasks", id="plan-title")
             yield Label(mode, id="plan-mode", classes="dry" if self.dry_run else "live")
             with VerticalScroll(id="plan-body"):
                 yield Static(self._plan_text(), id="plan-content")
@@ -65,6 +74,14 @@ class PlanScreen(ModalScreen[bool]):
             for command in task.preview(self.system):
                 lines.append(f"    [$text-muted]{escape(command)}[/]")
             lines.append("")
+
+        if self.removals:
+            lines.append("[b $error]Uninstall[/]")
+            for index, task in enumerate(self.removals, start=len(self.tasks) + 1):
+                lines.append(f"[b]{index}. Uninstall {task.title}[/]")
+                for command in task.undo_preview(self.system):
+                    lines.append(f"    [$text-muted]{escape(command)}[/]")
+                lines.append("")
 
         if any(task.reboot for task in self.tasks):
             lines.append("[$warning]Some tasks require a reboot.[/]")
@@ -240,10 +257,110 @@ class SystemScreen(ModalScreen[None]):
         self.dismiss(None)
 
 
+class RestoreScreen(ModalScreen[RestoreSession | None]):
+    """Pick a backup session and revert the file changes it recorded."""
+
+    BINDINGS = [Binding("escape,q", "dismiss(None)", "Close")]
+
+    def __init__(self, sessions: list[RestoreSession]) -> None:
+        super().__init__()
+        self.sessions = sessions
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="restore-dialog"):
+            yield Label("Restore a previous state", id="restore-title")
+            yield Static(
+                "Every run backs up the configuration files it changes. Pick a "
+                "session to put those files back the way they were. Installed "
+                "packages are not touched; uninstall applications from the list "
+                "with the u key.",
+                id="restore-intro",
+            )
+            yield OptionList(
+                *(
+                    Option(
+                        f"{session.label}  [$text-muted]{len(session.files)} files[/]",
+                        id=session.name,
+                    )
+                    for session in self.sessions
+                ),
+                id="restore-sessions",
+            )
+            yield Static("", id="restore-files")
+            with Horizontal(id="restore-buttons"):
+                yield Button("Restore this session", variant="primary", id="restore-go")
+                yield Button("Cancel", id="restore-cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#restore-sessions", OptionList).highlighted = 0
+
+    def _highlighted(self) -> RestoreSession | None:
+        index = self.query_one("#restore-sessions", OptionList).highlighted
+        if index is None:
+            return None
+        return self.sessions[index]
+
+    @on(OptionList.OptionHighlighted, "#restore-sessions")
+    def _session_highlighted(self) -> None:
+        session = self._highlighted()
+        if session is None:
+            return
+        shown = session.files[:12]
+        lines = [f"  [$text-muted]{escape(path)}[/]" for path in shown]
+        if len(session.files) > len(shown):
+            lines.append(f"  [$text-muted]... and {len(session.files) - len(shown)} more[/]")
+        if not lines:
+            lines = ["  [$text-muted]The file list could not be read.[/]"]
+        self.query_one("#restore-files", Static).update("\n".join(lines))
+
+    @on(OptionList.OptionSelected, "#restore-sessions")
+    @on(Button.Pressed, "#restore-go")
+    def _go(self) -> None:
+        self.dismiss(self._highlighted())
+
+    @on(Button.Pressed, "#restore-cancel")
+    def _cancel(self) -> None:
+        self.dismiss(None)
+
+
+class WelcomeScreen(ModalScreen[None]):
+    """Three steps for the first start; shown once, ? brings the full help."""
+
+    BINDINGS = [Binding("escape,enter,q", "dismiss(None)", "Close")]
+
+    TEXT = """[b]Welcome to uniscript[/]
+
+It sets a fresh Linux up: repositories, drivers, codecs,
+applications, gaming, tweaks. Nothing runs on its own.
+
+  [b $accent]1.[/] Move with the arrows, tick tasks with [b]space[/].
+  [b $accent]2.[/] Press [b]r[/] to see the exact commands.
+  [b $accent]3.[/] Confirm, and only then anything runs.
+
+Not sure yet? Press [b]d[/] first: dry run shows everything
+and changes nothing. [b]e[/] ticks a sensible starter set.
+Every file change is backed up; [b]b[/] restores, [b]u[/]
+uninstalls an application, [b]?[/] shows all the keys."""
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="welcome-dialog"):
+            yield Static(self.TEXT, id="welcome-content")
+            yield Button("Got it", variant="primary", id="welcome-close")
+
+    @on(Button.Pressed, "#welcome-close")
+    def _close(self) -> None:
+        self.dismiss(None)
+
+
 class HelpScreen(ModalScreen[None]):
     BINDINGS = [Binding("escape,enter,q,question_mark", "dismiss(None)", "Close")]
 
-    HELP = """[b]Navigation[/]
+    HELP = """[b]First steps[/]
+  Tick tasks with space, press r, read the plan, confirm. Nothing
+  runs before the plan is confirmed. Dry run (d) prints every
+  command and changes nothing, so it is the safe way to explore.
+
+[b]Navigation[/]
   [$accent]up, down[/]        move through the list
   [$accent]right, enter[/]    open the group under the cursor; from the
                   category list, jump to the tasks
@@ -261,6 +378,12 @@ class HelpScreen(ModalScreen[None]):
   [$accent]g[/]               gaming set
   [$accent]a[/]               select or clear the whole group the cursor is in
   [$accent]n[/]               deselect everything
+
+[b]Undoing things[/]
+  [$accent]u[/]               mark an installed application to be uninstalled;
+                  u again unmarks it, r runs it like any other task
+  [$accent]b[/]               restore configuration files from a backup session,
+                  the way back to the previous state
 
 [b]Mouse[/]
   A click ticks a task, a click on a group row opens it, a click on a

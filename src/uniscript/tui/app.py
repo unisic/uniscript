@@ -34,14 +34,22 @@ from textual.widgets.selection_list import Selection
 
 from ..catalog import build_tasks, categories_of
 from ..catalog.common import SourceInstall
-from ..core.backup import BackupStore
+from ..core.backup import BackupStore, list_restore_sessions
 from ..core.context import ExecContext
 from ..core.privileges import PrivilegeManager
 from ..core.probe import Probe
 from ..core.runner import CommandFailed
 from ..core.system import System
 from ..core.tasks import Category, Risk, Task
-from .screens import HelpScreen, PlanScreen, PromptScreen, SummaryScreen, SystemScreen
+from .screens import (
+    HelpScreen,
+    PlanScreen,
+    PromptScreen,
+    RestoreScreen,
+    SummaryScreen,
+    SystemScreen,
+    WelcomeScreen,
+)
 
 LOG_MAX_LINES = 2000
 
@@ -238,6 +246,8 @@ class UniscriptApp(App[None]):
         Binding("n", "clear_selection", "Deselect everything", show=False),
         Binding("d", "toggle_dry_run", "Dry run", show=False),
         Binding("f", "toggle_source", "Flatpak or system package", show=False),
+        Binding("u", "toggle_remove", "Uninstall", show=False),
+        Binding("b", "restore_backups", "Restore backups", show=False),
         Binding("s", "show_system", "System", show=False),
         Binding("t", "switch_palette", "Light or dark palette", show=False),
         Binding("shift+down", "scroll_detail(1)", "Scroll the description", show=False),
@@ -272,6 +282,8 @@ class UniscriptApp(App[None]):
         self._subcategory: str | None = None
         # Tasks whose install the user switched from Flatpak to the system package.
         self._native_ids: set[str] = set()
+        # Installed applications the user marked for uninstalling.
+        self._remove_ids: set[str] = set()
         self._syncing = False
         self._busy = False
         # Before compose: the stylesheet uses variables these themes define.
@@ -370,6 +382,19 @@ class UniscriptApp(App[None]):
                 "No sudo, no doas and not root. System tasks will not work.",
             )
         self._detect_applied()
+        self._show_welcome_once()
+
+    def _show_welcome_once(self) -> None:
+        # A three-step introduction, once per machine; ? reopens the help.
+        marker = self.backups.root.parent.parent / "welcome-shown"
+        if marker.exists():
+            return
+        try:
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.write_text("The TUI welcome screen was shown.\n", encoding="utf-8")
+        except OSError:
+            return
+        self.push_screen(WelcomeScreen())
 
     def _debug_focus(self) -> None:
         focused = self.screen.focused
@@ -436,7 +461,9 @@ class UniscriptApp(App[None]):
         # One-character flags keep the titles in a straight column; the legend
         # sits under the description panel and in the help.
         applied = self._applied.get(task.id)
-        if applied:
+        if task.id in self._remove_ids:
+            marker = "[$text-error]✗[/]"
+        elif applied:
             marker = "[$text-success]✓[/]"
         elif task.risk is Risk.HIGH:
             marker = "[$text-error]▲[/]"
@@ -447,7 +474,9 @@ class UniscriptApp(App[None]):
         title = escape(task.title)
         if applied:
             title = f"[$text-muted]{title}[/]"
-        if task.id in self._native_ids:
+        if task.id in self._remove_ids:
+            title += "  [$text-error]· uninstall[/]"
+        elif task.id in self._native_ids:
             title += "  [$text-muted]· system package[/]"
         return f"{marker} {title}"
 
@@ -608,6 +637,10 @@ class UniscriptApp(App[None]):
         if self._dual_source(task):
             source = "system package" if task.id in self._native_ids else "Flatpak"
             badges.append(f"[$text-accent]source: {source}, f switches[/]")
+        if task.id in self._remove_ids:
+            badges.append("[b $text-error]✗ marked to uninstall, u clears[/]")
+        elif task.removable and applied is True:
+            badges.append("[$text-muted]u uninstalls[/]")
         lines.append("[$text-muted]  ·  [/]".join(badges))
         lines.append("")
         lines.append(escape(task.summary))
@@ -622,10 +655,15 @@ class UniscriptApp(App[None]):
             for detail in task.details:
                 lines.append(f"  [$text-accent]•[/] {escape(detail)}")
 
-        commands = task.preview(self.system)
+        if task.id in self._remove_ids:
+            commands = task.undo_preview(self.system)
+            heading = "[b]What uninstalling will do[/]"
+        else:
+            commands = task.preview(self.system)
+            heading = "[b]What will be done[/]"
         if commands:
             lines.append("")
-            lines.append("[b]What will be done[/]")
+            lines.append(heading)
             # Not every preview line is a shell command (some are notes or
             # file writes), so the marker is a neutral arrow rather than $.
             for command in commands:
@@ -693,14 +731,18 @@ class UniscriptApp(App[None]):
         else:
             mode.update("[$text-success]live mode[/]")
         pending = sum(1 for task in self.tasks if task.id in self.selected)
-        self.query_one("#status-count", Label).update(f"selected: {pending}")
+        removals = len(self._remove_ids)
+        count = f"selected: {pending}"
+        if removals:
+            count += f"  [$text-error]uninstall: {removals}[/]"
+        self.query_one("#status-count", Label).update(count)
         dry = self.query_one("#act-dry", Button)
         dry.label = f"Dry run: {'on' if self.dry_run else 'OFF'} (d)"
         dry.set_class(not self.dry_run, "-live")
         run = self.query_one("#act-run", Button)
-        run.label = f"▶ Run {pending} (r)"
+        run.label = f"▶ Run {pending + removals} (r)"
         # Nothing selected means nothing to run; a lit green button would lie.
-        run.disabled = pending == 0 or self._busy
+        run.disabled = pending + removals == 0 or self._busy
         sidebar = self.query_one("#sidebar", OptionList)
         for category in self.categories:
             sidebar.replace_option_prompt(category.name, self._sidebar_prompt(category))
@@ -908,7 +950,60 @@ class UniscriptApp(App[None]):
             self._enter_dir(value.removeprefix(_DIR_PREFIX))
 
     def action_clear_selection(self) -> None:
+        self._remove_ids.clear()
         self._apply_preset(set(), "selection cleared")
+
+    def action_toggle_remove(self) -> None:
+        value = self.query_one("#tasks", TaskList)._highlighted_value()
+        task = self._task_by_id(value) if value else None
+        if task is None:
+            return
+        if task.id in self._remove_ids:
+            self._remove_ids.discard(task.id)
+        elif not task.removable:
+            self.notify("This task cannot be uninstalled from here.", severity="warning")
+            return
+        elif not self._applied.get(task.id):
+            self.notify("Not installed, so there is nothing to uninstall.", severity="warning")
+            return
+        else:
+            self._remove_ids.add(task.id)
+            self.selected.discard(task.id)
+        self._refresh_task_list()
+        self._refresh_status()
+        self._show_detail(task)
+
+    @work(group="run", exclusive=False)
+    async def action_restore_backups(self) -> None:
+        if self._busy:
+            self.notify("Tasks are running; restore afterwards.", severity="warning")
+            return
+        sessions = list_restore_sessions(self.backups.root.parent)
+        if not sessions:
+            self.notify("No backup sessions to restore from yet.", timeout=5)
+            return
+        chosen = await self.push_screen_wait(RestoreScreen(sessions))
+        if chosen is None:
+            return
+        # restore.sh calls sudo itself, so it runs on the real terminal where
+        # a password prompt can be answered.
+        try:
+            with self.suspend():
+                print(f"\nRestoring the files of session {chosen.label}.")
+                print(f"$ bash {shlex.quote(str(chosen.script))}\n")
+                code = subprocess.call(["bash", str(chosen.script)])
+                input("\nPress Enter to return to uniscript. ")
+        except Exception as exc:
+            self._log("error", f"could not hand over the terminal: {exc}")
+            return
+        if code == 0:
+            self._log("ok", f"restored the files of session {chosen.label}")
+        else:
+            self._log("error", f"restore.sh exited with code {code}")
+        self.probe.invalidate()
+        self._applied = await asyncio.to_thread(self._compute_applied)
+        self._refresh_task_list()
+        self._refresh_status()
 
     def action_toggle_dry_run(self) -> None:
         if self._busy:
@@ -978,7 +1073,7 @@ class UniscriptApp(App[None]):
         if self._busy:
             self.notify("Tasks are already running.", severity="warning")
             return
-        if not self.selected:
+        if not self.selected and not self._remove_ids:
             self.notify("No task is selected.", severity="warning")
             return
         self._execute()
@@ -1034,7 +1129,8 @@ class UniscriptApp(App[None]):
     async def _execute(self) -> None:
         ordered = [task for task in self.tasks if task.id in self.selected]
         planned, inputs, skipped = await self._ask_inputs(ordered)
-        if not planned:
+        removals = [task for task in self.tasks if task.id in self._remove_ids]
+        if not planned and not removals:
             self._log("warn", "nothing left to do")
             return
         # The source switches ride in the same inputs channel the prompts use;
@@ -1043,12 +1139,16 @@ class UniscriptApp(App[None]):
             if task.id in self._native_ids:
                 inputs[task.id] = "native"
 
-        confirmed = await self.push_screen_wait(PlanScreen(planned, self.system, self.dry_run))
+        confirmed = await self.push_screen_wait(
+            PlanScreen(planned, self.system, self.dry_run, removals=removals)
+        )
         if not confirmed:
             self._log("info", "cancelled")
             return
 
-        needs_root = any(task.requires_root() for task in planned)
+        needs_root = any(task.requires_root() for task in planned) or any(
+            task.undo_requires_root() for task in removals
+        )
         if needs_root and not self.dry_run and self.privileges.backend in {"sudo", "doas"}:
             if not await self.privileges.is_primed():
                 if not self._prime_privileges():
@@ -1069,36 +1169,45 @@ class UniscriptApp(App[None]):
 
         done: list[str] = []
         done_ids: set[str] = set()
+        removed_ids: set[str] = set()
         failed: list[tuple[str, str]] = []
+        jobs = [(task, False) for task in planned] + [(task, True) for task in removals]
         progress = self.query_one("#progress", ProgressBar)
         # From here on there is output worth watching, so the log earns its place.
         self.query_one("#console", Vertical).display = True
         self._busy = True
         self._set_controls_enabled(False)
         progress.display = True
-        progress.update(total=len(planned), progress=0)
+        progress.update(total=len(jobs), progress=0)
 
         try:
-            for index, task in enumerate(planned, start=1):
-                self._log("task", f"[{index}/{len(planned)}] {task.title}")
+            for index, (task, uninstall) in enumerate(jobs, start=1):
+                title = f"Uninstall {task.title}" if uninstall else task.title
+                self._log("task", f"[{index}/{len(jobs)}] {title}")
                 try:
-                    await task.run(ctx)
+                    if uninstall:
+                        await task.run_undo(ctx)
+                    else:
+                        await task.run(ctx)
                 except asyncio.CancelledError:
-                    self._log("warn", f"aborted: {task.title}")
-                    skipped.extend(item.title for item in planned[index - 1 :])
+                    self._log("warn", f"aborted: {title}")
+                    skipped.extend(
+                        f"Uninstall {item.title}" if undo else item.title
+                        for item, undo in jobs[index - 1 :]
+                    )
                     raise
                 except CommandFailed as exc:
-                    failed.append((task.title, str(exc)))
-                    self._log("error", f"failed: {task.title}")
+                    failed.append((title, str(exc)))
+                    self._log("error", f"failed: {title}")
                     for line in exc.tail[-10:]:
                         self._log("error", f"  {line}")
                 except Exception as exc:  # one task must not take the app down
-                    failed.append((task.title, f"{type(exc).__name__}: {exc}"))
-                    self._log("error", f"failed: {task.title}: {exc}")
+                    failed.append((title, f"{type(exc).__name__}: {exc}"))
+                    self._log("error", f"failed: {title}: {exc}")
                 else:
-                    done.append(task.title)
-                    done_ids.add(task.id)
-                    self._log("ok", f"done: {task.title}")
+                    done.append(title)
+                    (removed_ids if uninstall else done_ids).add(task.id)
+                    self._log("ok", f"done: {title}")
                 finally:
                     progress.advance(1)
         except asyncio.CancelledError:
@@ -1113,6 +1222,8 @@ class UniscriptApp(App[None]):
             self.probe.invalidate()
             self._applied = await asyncio.to_thread(self._compute_applied)
         self.selected -= done_ids
+        if not self.dry_run:
+            self._remove_ids -= removed_ids
         self._refresh_task_list()
         self._refresh_status()
 
