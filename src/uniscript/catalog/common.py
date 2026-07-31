@@ -9,12 +9,14 @@ from pathlib import Path
 
 from ..core.context import ExecContext
 from ..core.probe import Probe
+from ..core.runner import CommandFailed
 from ..core.system import System
 from ..core.tasks import (
     Category,
     Custom,
     Install,
     Note,
+    Remove,
     Risk,
     Run,
     Shell,
@@ -184,6 +186,10 @@ def _flatpak_install(app_ids: list[str], remote: str = "flathub") -> Step:
         ["flatpak", "install", "--system", "-y", "--noninteractive", remote, *app_ids],
         timeout=3600.0,
     )
+
+
+def _flatpak_uninstall(app_ids: list[str]) -> Step:
+    return Run(["flatpak", "uninstall", "--system", "-y", *app_ids], timeout=600.0)
 
 
 # ------------------------------------------------------------------- Snap
@@ -1062,6 +1068,15 @@ def _shell_tasks(system: System) -> list[Task]:
 # ----------------------------------------------------------- Applications
 
 
+@dataclass(frozen=True)
+class NativeRequirement:
+    """An extra repository the system package needs, checked before installing."""
+
+    title: str
+    task_title: str
+    check: list[str]  # exits 0 when the repository is already enabled
+
+
 @dataclass
 class SourceInstall(Step):
     """Install from Flathub by default, or from the system repositories.
@@ -1073,6 +1088,7 @@ class SourceInstall(Step):
 
     flatpak_id: str
     packages: list[str]
+    requires: NativeRequirement | None = None
 
     def __post_init__(self) -> None:
         self._flatpak = _flatpak_install([self.flatpak_id])
@@ -1080,16 +1096,72 @@ class SourceInstall(Step):
 
     def preview(self, system: System) -> list[str]:
         native = " ".join(self._native.preview(system))
-        return [
+        lines = [
             *self._flatpak.preview(system),
             f"or as a system package: {native}",
         ]
+        if self.requires is not None:
+            lines.append(
+                f"   the system package needs {self.requires.title}; "
+                f"the '{self.requires.task_title}' task enables it"
+            )
+        return lines
 
     async def run(self, ctx: ExecContext) -> None:
-        if ctx.inputs.get(ctx.current_task_id) == "native":
-            await self._native.run(ctx)
-        else:
+        if ctx.inputs.get(ctx.current_task_id) != "native":
             await self._flatpak.run(ctx)
+            return
+        if self.requires is not None and not await ctx.capture(self.requires.check):
+            # The check command is read only, so it runs even in dry-run mode.
+            message = (
+                f"{self.requires.title} is not enabled; "
+                f"run the '{self.requires.task_title}' task first"
+            )
+            if ctx.dry_run:
+                ctx.log(f"a live run would stop here: {message}", "warn")
+            else:
+                raise CommandFailed(self.requires.check, 1, [message])
+        await self._native.run(ctx)
+
+
+@dataclass
+class SourceRemove(Step):
+    """Remove whichever form of the application is actually installed."""
+
+    flatpak_id: str
+    packages: list[str]
+
+    def preview(self, system: System) -> list[str]:
+        prefix = "" if system.is_root else "sudo "
+        lines = [
+            f"{prefix}flatpak uninstall --system -y {self.flatpak_id}"
+            "   (when installed as Flatpak)"
+        ]
+        pm = system.package_manager
+        if pm is not None:
+            lines.append(
+                prefix
+                + " ".join(pm.remove_cmd(self.packages))
+                + "   (when installed as a system package)"
+            )
+        return lines
+
+    async def run(self, ctx: ExecContext) -> None:
+        removed = False
+        if ctx.probe.has_flatpak_app(self.flatpak_id):
+            await ctx.run(
+                ["flatpak", "uninstall", "--system", "-y", self.flatpak_id],
+                root=True,
+                timeout=600.0,
+            )
+            removed = True
+        pm = ctx.system.package_manager
+        present = [p for p in self.packages if p in ctx.probe.installed_packages]
+        if pm is not None and present:
+            await ctx.run(pm.remove_cmd(present), root=True, timeout=900.0)
+            removed = True
+        if not removed:
+            ctx.log("not installed in either form, nothing to remove", "skip")
 
 
 def _native_app_packages(system: System) -> dict[str, list[str]]:
@@ -1097,8 +1169,9 @@ def _native_app_packages(system: System) -> dict[str, list[str]]:
 
     Same-name entries are verified across Fedora, Debian, Ubuntu, Arch and
     openSUSE (Repology); the rest differ per family or are missing from some
-    (HandBrake needs RPM Fusion on Fedora, the Ubuntu Thunderbird deb is a
-    snap shim, so those families are left out).
+    (the Ubuntu Thunderbird deb is a snap shim, so the debian family is left
+    out there; HandBrake on Fedora lives in RPM Fusion, which becomes an
+    explicit requirement rather than an exclusion).
     """
     same = [
         ("apps-vlc", "vlc"),
@@ -1132,10 +1205,24 @@ def _native_app_packages(system: System) -> dict[str, list[str]]:
     )
     mapping["apps-handbrake"] = by_family(
         system,
+        rhel=["HandBrake-gui"],
         debian=["handbrake"],
         arch=["handbrake"],
     )
     return {task_id: names for task_id, names in mapping.items() if names}
+
+
+def _native_requirements(system: System) -> dict[str, NativeRequirement]:
+    """Apps whose system package sits in a repository uniscript has a task for."""
+    if system.family != "rhel":
+        return {}
+    return {
+        "apps-handbrake": NativeRequirement(
+            title="RPM Fusion free",
+            task_title="RPM Fusion repositories (free and nonfree)",
+            check=["rpm", "-q", "rpmfusion-free-release"],
+        ),
+    }
 
 
 def _app_tasks(system: System) -> list[Task]:
@@ -1608,22 +1695,33 @@ def _app_tasks(system: System) -> list[Task]:
 
     tasks: list[Task] = []
     natives = _native_app_packages(system)
+    requirements = _native_requirements(system)
     for subcategory, apps in groups:
         for task_id, title, app_id, summary, details in apps:
             native = natives.get(task_id)
             if native:
-                steps: list[Step] = [SourceInstall(app_id, native)]
+                requires = requirements.get(task_id)
+                steps: list[Step] = [SourceInstall(app_id, native, requires=requires)]
+                undo: list[Step] = [SourceRemove(app_id, native)]
                 extra = [
                     "Source: Flathub, or the system repositories "
                     f"({' '.join(native)}) when you switch the source.",
                     f"Application id: {app_id}",
                 ]
+                if requires is not None:
+                    extra.insert(
+                        1,
+                        f"The system package comes from {requires.title}; the "
+                        f"'{requires.task_title}' task has to run first (select both "
+                        "and they run in the right order).",
+                    )
                 detect = (
                     lambda app, names: lambda probe, sys_: probe.has_flatpak_app(app)
                     or probe.has_any_package(*names)
                 )(app_id, native)
             else:
                 steps = [_flatpak_install([app_id])]
+                undo = [_flatpak_uninstall([app_id])]
                 extra = ["Source: Flathub.", f"Application id: {app_id}"]
                 detect = (lambda app: lambda probe, sys_: probe.has_flatpak_app(app))(app_id)
             tasks.append(
@@ -1636,6 +1734,7 @@ def _app_tasks(system: System) -> list[Task]:
                     risk=Risk.SAFE,
                     details=[*details, *extra],
                     steps=steps,
+                    undo_steps=undo,
                     detect=detect,
                 )
             )
@@ -1689,6 +1788,10 @@ def _unisic_task(system: System) -> Task:
                 Run(["dnf", "-y", "copr", "enable", "deandark/Unisic"]),
                 Install(["unisic"]),
             ],
+            undo_steps=[
+                Remove(["unisic"]),
+                Run(["dnf", "-y", "copr", "disable", "deandark/Unisic"], allow_fail=True),
+            ],
             detect=lambda probe, sys_: probe.has_package("unisic"),
         )
     return Task(
@@ -1711,6 +1814,7 @@ def _unisic_task(system: System) -> Task:
             Shell(_UNISIC_APPIMAGE_SCRIPT, root=False),
             _gearlever_integrate(UNISIC_APPIMAGE),
         ],
+        undo_steps=_appimage_remove_steps("unisic", UNISIC_APPIMAGE),
         detect=_appimage_detect("unisic", UNISIC_APPIMAGE),
     )
 
@@ -1776,6 +1880,24 @@ def _gearlever_integrate(relative_path: str) -> Step:
     )
 
 
+def _appimage_remove_steps(name: str, relative_path: str) -> list[Step]:
+    """Delete the AppImage from both places it can live in.
+
+    An unmatched glob stays literal and rm -f ignores a missing path, so the
+    command succeeds whichever of the two locations the file ended up in.
+    """
+    return [
+        Shell(
+            f'rm -f "$HOME/{relative_path}" "$HOME/{GEARLEVER_FOLDER}"/*{name}*',
+            root=False,
+        ),
+        Note(
+            "If Gear Lever added a menu entry for it, open Gear Lever once to "
+            "let it clean the entry up."
+        ),
+    ]
+
+
 def _appimage_detect(name: str, relative_path: str) -> Callable[[Probe, System], bool]:
     """Installed either as the plain download or as a Gear Lever managed file.
 
@@ -1828,6 +1950,10 @@ def _helium_task(system: System) -> Task:
                 Run(["dnf", "-y", "copr", "enable", "imput/helium"]),
                 Install(["helium-bin"]),
             ],
+            undo_steps=[
+                Remove(["helium-bin"]),
+                Run(["dnf", "-y", "copr", "disable", "imput/helium"], allow_fail=True),
+            ],
             detect=lambda probe, sys_: probe.has_package("helium-bin"),
         )
     if system.family == "debian":
@@ -1853,6 +1979,11 @@ def _helium_task(system: System) -> Task:
                 Run(["apt-get", "update"]),
                 Run(["apt-get", "install", "-y", "helium-bin"], timeout=1800.0),
             ],
+            undo_steps=[
+                Remove(["helium-bin"]),
+                Run(["rm", "-f", HELIUM_LIST, HELIUM_KEY]),
+                Run(["apt-get", "update"], allow_fail=True),
+            ],
             detect=lambda probe, sys_: probe.has_package("helium-bin"),
         )
     return Task(
@@ -1875,6 +2006,7 @@ def _helium_task(system: System) -> Task:
             Shell(_HELIUM_APPIMAGE_SCRIPT, root=False),
             _gearlever_integrate(HELIUM_APPIMAGE),
         ],
+        undo_steps=_appimage_remove_steps("helium", HELIUM_APPIMAGE),
         detect=_appimage_detect("helium", HELIUM_APPIMAGE),
     )
 
@@ -1905,6 +2037,7 @@ def _desktop_tool_tasks(system: System) -> list[Task]:
             subcategory="Desktop tools",
             risk=Risk.SAFE,
             steps=[Install(["gnome-tweaks"])],
+            undo_steps=[Remove(["gnome-tweaks"])],
             available=_gnome,
             detect=lambda probe, sys_: probe.has_package("gnome-tweaks"),
         ),
@@ -1917,6 +2050,7 @@ def _desktop_tool_tasks(system: System) -> list[Task]:
             risk=Risk.SAFE,
             details=["Source: Flathub.", "Application id: com.mattjakeman.ExtensionManager"],
             steps=[_flatpak_install(["com.mattjakeman.ExtensionManager"])],
+            undo_steps=[_flatpak_uninstall(["com.mattjakeman.ExtensionManager"])],
             available=_gnome,
             detect=lambda probe, sys_: probe.has_flatpak_app("com.mattjakeman.ExtensionManager"),
         ),
@@ -1929,6 +2063,7 @@ def _desktop_tool_tasks(system: System) -> list[Task]:
             risk=Risk.SAFE,
             details=["Changing keys blindly can misconfigure applications; it warns on write."],
             steps=[Install(["dconf-editor"])],
+            undo_steps=[Remove(["dconf-editor"])],
             available=_gnome,
             detect=lambda probe, sys_: probe.has_package("dconf-editor"),
         ),
@@ -1941,6 +2076,7 @@ def _desktop_tool_tasks(system: System) -> list[Task]:
             risk=Risk.SAFE,
             details=["The standard way to theme GTK applications under Xfce, LXDE or a bare WM."],
             steps=[Install(["lxappearance"])],
+            undo_steps=[Remove(["lxappearance"])],
             available=_plain_desktop,
             detect=lambda probe, sys_: probe.has_package("lxappearance"),
         ),
@@ -1966,6 +2102,7 @@ def _desktop_tool_tasks(system: System) -> list[Task]:
                     "Settings offers.",
                 ],
                 steps=[Install(kvantum)],
+                undo_steps=[Remove(kvantum)],
                 available=_qt_desktop,
                 detect=(
                     lambda names: lambda probe, sys_: probe.has_any_package(*names)
@@ -1985,6 +2122,7 @@ def _desktop_tool_tasks(system: System) -> list[Task]:
                 risk=Risk.SAFE,
                 details=["X11 only; on Wayland the compositor sets the wallpaper."],
                 steps=[Install(["nitrogen"])],
+                undo_steps=[Remove(["nitrogen"])],
                 available=_plain_desktop,
                 detect=lambda probe, sys_: probe.has_package("nitrogen"),
             )

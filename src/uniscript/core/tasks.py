@@ -311,6 +311,12 @@ class Task:
     available: AvailableFn | None = None
     warning: str | None = None
     prompt: InputPrompt | None = None
+    undo_steps: list[Step] = field(default_factory=list)
+
+    @property
+    def removable(self) -> bool:
+        """Whether the task can also take its work back out."""
+        return bool(self.undo_steps)
 
     def is_available(self, system: System) -> bool:
         return self.available(system) if self.available else True
@@ -327,9 +333,18 @@ class Task:
     def requires_root(self) -> bool:
         return any(step.requires_root() for step in self.steps)
 
+    def undo_requires_root(self) -> bool:
+        return any(step.requires_root() for step in self.undo_steps)
+
     def preview(self, system: System) -> list[str]:
         lines: list[str] = []
         for step in self.steps:
+            lines.extend(step.preview(system))
+        return lines
+
+    def undo_preview(self, system: System) -> list[str]:
+        lines: list[str] = []
+        for step in self.undo_steps:
             lines.extend(step.preview(system))
         return lines
 
@@ -339,3 +354,8 @@ class Task:
             await step.run(ctx)
         if self.reboot:
             ctx.require_reboot()
+
+    async def run_undo(self, ctx: ExecContext) -> None:
+        ctx.current_task_id = self.id
+        for step in self.undo_steps:
+            await step.run(ctx)
