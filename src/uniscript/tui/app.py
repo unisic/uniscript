@@ -28,10 +28,8 @@ from textual.widgets import (
     RichLog,
     SelectionList,
     Static,
-    Tab,
-    Tabs,
 )
-from textual.widgets.option_list import OptionDoesNotExist
+from textual.widgets.option_list import Option, OptionDoesNotExist
 from textual.widgets.selection_list import Selection
 
 from ..catalog import build_tasks, categories_of
@@ -46,85 +44,119 @@ from .screens import HelpScreen, PlanScreen, PromptScreen, SummaryScreen, System
 
 LOG_MAX_LINES = 2000
 
-# The value of a list entry that is a category header rather than a task.
+# List entries that are not tasks all start with NUL, which no task id does:
+# group headers in search results, subcategory directories and the ".." row.
 _HEADER_PREFIX = "\x00header:"
+_GAP_PREFIX = "\x00gap:"
+_DIR_PREFIX = "\x00dir:"
+_UP_VALUE = "\x00up"
 
-# The dark palette follows the WinUtil dark theme (ChrisTitusTech/winutil,
-# config/themes.json): graphite background, cyan group labels, steel blue for
-# the cursor, WinUtil's toggle blue for a ticked box and its green for success.
-# Amber and red carry the meanings WinUtil does not need: "changes system
-# behaviour" and "can break the system".
+# The dark palette is Tokyo Night (folke/tokyonight.nvim, night variant):
+# a near-black background, blue for the cursor and a ticked box, cyan for
+# structure (brand, group labels, directory chevrons). Amber, red and green
+# carry the task states: "changes behaviour", "can break things", "done".
 DARK_THEME = Theme(
     name="uniscript-dark",
-    primary="#5e81ac",
-    secondary="#81a1c1",
-    accent="#5bdcff",
-    warning="#ebcb8b",
-    error="#bf616a",
-    success="#6eff72",
-    foreground="#f7f7f7",
-    background="#232629",
-    surface="#2b3036",
-    panel="#333b43",
+    primary="#7aa2f7",
+    secondary="#bb9af7",
+    accent="#7dcfff",
+    warning="#e0af68",
+    error="#f7768e",
+    success="#9ece6a",
+    foreground="#c0caf5",
+    background="#16161e",
+    surface="#1a1b26",
+    panel="#24283b",
     dark=True,
     variables={
-        "toggle-on": "#2e77ff",
-        "btn-bg": "#1e3747",
-        "btn-hover": "#3b4252",
+        "toggle-on": "#7aa2f7",
+        "btn-bg": "#2f334d",
+        "btn-hover": "#3b4261",
     },
 )
 
-# The same roles moved onto a light background; WinUtil itself is dark only.
+# The same roles on the Tokyo Night day palette.
 LIGHT_THEME = Theme(
     name="uniscript-light",
-    primary="#4a6e96",
-    secondary="#2f7d6c",
-    accent="#00779d",
-    warning="#9a6a12",
-    error="#a83232",
-    success="#2e7d32",
-    foreground="#1f2328",
-    background="#fafafa",
-    surface="#f1f2f3",
-    panel="#e0e4e8",
+    primary="#2e7de9",
+    secondary="#9854f1",
+    accent="#007197",
+    warning="#8c6c3e",
+    error="#f52a65",
+    success="#587539",
+    foreground="#343b58",
+    background="#e1e2e7",
+    surface="#e9e9ed",
+    panel="#d3d7e4",
     dark=False,
     variables={
-        "toggle-on": "#1d5fcc",
-        "btn-bg": "#d5e0ea",
-        "btn-hover": "#c2d1de",
+        "toggle-on": "#2e7de9",
+        "btn-bg": "#c8cede",
+        "btn-hover": "#b9c1d6",
     },
 )
 
-# Tab captions; the full Category.label would not fit eleven tabs in a row.
-_TAB_LABELS = {
+# Sidebar captions; at most 12 cells, so a selected-count badge still fits
+# next to the longest of them.
+_SIDEBAR_LABELS = {
     Category.SYSTEM: "System",
-    Category.REPOS: "Repos",
+    Category.REPOS: "Repositories",
     Category.DRIVERS: "Drivers",
-    Category.MULTIMEDIA: "Media",
-    Category.PACKAGING: "Flatpak",
+    Category.MULTIMEDIA: "Multimedia",
+    Category.PACKAGING: "Flatpak/Snap",
     Category.GAMING: "Gaming",
     Category.TWEAKS: "Tweaks",
     Category.SHELL: "Shell",
-    Category.APPS: "Apps",
-    Category.MAINTENANCE: "Cleanup",
+    Category.APPS: "Applications",
+    Category.MAINTENANCE: "Maintenance",
 }
 
 
-class TaskList(SelectionList[str]):
-    """A selection list where category headers are rows without a checkbox.
+def _parse_header(value: str) -> tuple[Category, str | None] | None:
+    """The (category, subcategory) a search result header stands for."""
+    name, _, subcategory = value.removeprefix(_HEADER_PREFIX).partition(":")
+    category = Category.__members__.get(name)
+    if category is None:
+        return None
+    return category, subcategory or None
 
-    SelectionList draws a toggle button in front of every entry, including the
-    disabled ones, so an unmodified header would read as an unticked task. Here
+
+class TaskList(SelectionList[str]):
+    """A selection list where headers, directories and ".." have no checkbox.
+
+    SelectionList draws a toggle button in front of every entry, so an
+    unmodified header or directory row would read as an unticked task. Here
     the button is replaced by blank space of the same width, which keeps the
-    titles of the tasks aligned.
+    titles of the tasks aligned. Directory rows and the ".." row stay enabled,
+    so the cursor reaches them, but selecting one navigates instead of
+    toggling a checkbox.
     """
 
     class HeaderClicked(Message):
-        """A category header row was clicked with the mouse."""
+        """A group header row was clicked with the mouse."""
 
-        def __init__(self, category: Category) -> None:
+        def __init__(self, category: Category, subcategory: str | None) -> None:
             super().__init__()
             self.category = category
+            self.subcategory = subcategory
+
+    class DirEntered(Message):
+        """A subcategory directory row was activated."""
+
+        def __init__(self, subcategory: str) -> None:
+            super().__init__()
+            self.subcategory = subcategory
+
+    class WentUp(Message):
+        """The ".." row was activated."""
+
+    def _highlighted_value(self) -> str | None:
+        if self.highlighted is None:
+            return None
+        try:
+            return str(self.get_option_at_index(self.highlighted).value)
+        except OptionDoesNotExist:
+            return None
 
     def render_line(self, y: int) -> Strip:
         _, scroll_y = self.scroll_offset
@@ -132,15 +164,27 @@ class TaskList(SelectionList[str]):
             option = self.get_option_at_index(scroll_y + y)
         except OptionDoesNotExist:
             return super().render_line(y)
-        if not str(option.value).startswith(_HEADER_PREFIX):
+        if not str(option.value).startswith("\x00"):
             return super().render_line(y)
         line = OptionList.render_line(self, y)
         segments = list(line)
         style = segments[0].style if segments else self.rich_style
         return Strip([Segment(" " * self._get_left_gutter_width(), style=style), *segments])
 
+    def action_select(self) -> None:
+        # Space or enter on a directory descends into it and on ".." goes
+        # back up; only real tasks fall through to the checkbox toggle.
+        value = self._highlighted_value()
+        if value == _UP_VALUE:
+            self.post_message(self.WentUp())
+            return
+        if value is not None and value.startswith(_DIR_PREFIX):
+            self.post_message(self.DirEntered(value.removeprefix(_DIR_PREFIX)))
+            return
+        super().action_select()
+
     def _on_click(self, event: events.Click) -> None:
-        # OptionList drops clicks on disabled rows, but a click on a category
+        # OptionList drops clicks on disabled rows, but a click on a group
         # header should act on the whole group, like the a key does. The message
         # pump calls OptionList._on_click on its own for every click (private
         # handlers run per class), so this must never call super() itself.
@@ -151,22 +195,12 @@ class TaskList(SelectionList[str]):
             value = str(self.get_option_at_index(index).value)
         except OptionDoesNotExist:
             return
-        category = Category.__members__.get(value.removeprefix(_HEADER_PREFIX))
-        if category is not None:
+        if not value.startswith(_HEADER_PREFIX):
+            return
+        parsed = _parse_header(value)
+        if parsed is not None:
             event.stop()
-            self.post_message(self.HeaderClicked(category))
-
-
-class TabsRow(Tabs):
-    """A tab bar that also answers to the mouse wheel."""
-
-    def _on_mouse_scroll_down(self, event: events.MouseScrollDown) -> None:
-        event.stop()
-        self.action_next_tab()
-
-    def _on_mouse_scroll_up(self, event: events.MouseScrollUp) -> None:
-        event.stop()
-        self.action_previous_tab()
+            self.post_message(self.HeaderClicked(*parsed))
 
 
 _LOG_STYLES = {
@@ -206,8 +240,8 @@ class UniscriptApp(App[None]):
         Binding("t", "switch_palette", "Light or dark palette", show=False),
         Binding("shift+down", "scroll_detail(1)", "Scroll the description", show=False),
         Binding("shift+up", "scroll_detail(-1)", "Scroll the description", show=False),
-        Binding("left", "prev_tab", "Previous tab", show=False),
-        Binding("right", "next_tab", "Next tab", show=False),
+        Binding("left", "nav_left", "Back", show=False),
+        Binding("right", "nav_right", "Enter", show=False),
         Binding("l", "toggle_console", "Log panel", show=False),
         Binding("c", "clear_log", "Clear log", show=False),
         Binding("escape", "abort", "Abort", show=False),
@@ -232,7 +266,8 @@ class UniscriptApp(App[None]):
         self.selected: set[str] = set()
         self._applied: dict[str, bool | None] = {}
         self._query = ""
-        self._active_category: Category | None = None
+        self._active_category: Category | None = self.categories[0] if self.categories else None
+        self._subcategory: str | None = None
         self._syncing = False
         self._busy = False
         # Before compose: the stylesheet uses variables these themes define.
@@ -244,20 +279,29 @@ class UniscriptApp(App[None]):
         manager = self.system.package_manager.name if self.system.package_manager else "none"
         return f"{self.system.pretty_name}  |  {manager}"
 
+    def _sidebar_prompt(self, category: Category) -> str:
+        label = _SIDEBAR_LABELS.get(category, category.label)
+        chosen = sum(
+            1 for task in self.tasks if task.category is category and task.id in self.selected
+        )
+        if chosen:
+            return f"{label:<12} [$text-accent]{chosen:>2}[/]"
+        return label
+
     def compose(self) -> ComposeResult:
         with Horizontal(id="topbar"):
-            yield Label("uniscript", id="brand")
+            yield Label("[$text-accent]▌[/]uniscript", id="brand")
             yield Input(placeholder="search the tasks  ( / )", id="search")
             yield Label("", id="match-count")
-        yield TabsRow(
-            Tab("All", id="tab-ALL"),
-            *(
-                Tab(_TAB_LABELS.get(category, category.label), id=f"tab-{category.name}")
-                for category in self.categories
-            ),
-            id="tabs",
-        )
+            yield Label(self._subtitle(), id="sysinfo")
         with Horizontal(id="workspace"):
+            yield OptionList(
+                *(
+                    Option(self._sidebar_prompt(category), id=category.name)
+                    for category in self.categories
+                ),
+                id="sidebar",
+            )
             yield TaskList(id="tasks")
             with VerticalScroll(id="detail"):
                 yield Static("", id="detail-content")
@@ -266,7 +310,6 @@ class UniscriptApp(App[None]):
             yield Button("Dry run: on (d)", id="act-dry", compact=True)
             yield Button("Essentials (e)", id="act-ess", compact=True)
             yield Button("Gaming (g)", id="act-gaming", compact=True)
-            yield Label(self._subtitle(), id="sysinfo")
         with Vertical(id="console"):
             with Horizontal(id="statusbar"):
                 yield Label("", id="status-mode")
@@ -282,24 +325,28 @@ class UniscriptApp(App[None]):
         yield Footer()
 
     def on_mount(self) -> None:
+        sidebar = self.query_one("#sidebar", OptionList)
+        if self.categories:
+            sidebar.highlighted = 0
         tasks = self.query_one("#tasks", TaskList)
-        tasks.border_title = "Tasks"
         # The keys that are not in the footer but are needed to pick anything.
-        tasks.border_subtitle = "space toggles a task, a toggles the group"
+        tasks.border_subtitle = "space toggles, right enters, left backs out"
         detail = self.query_one("#detail", VerticalScroll)
         detail.border_title = "Description"
         detail.border_subtitle = (
             "[$text-warning]●[/] care  [$text-error]▲[/] risk  [$text-success]✓[/] done"
         )
-        # A click on the description, the log, the tabs or a button must not
-        # steal the keyboard from the list: arrows always drive the list,
-        # left and right switch tabs, the wheel scrolls what it hovers over
-        # and shift+arrows scroll the description.
+        # A click on the description, the log or a button must not steal the
+        # keyboard from the list: arrows always drive the focused list, left
+        # and right move between the panes, the wheel scrolls what it hovers
+        # over and shift+arrows scroll the description.
         detail.can_focus = False
         log = self.query_one("#log", RichLog)
         log.border_title = "Log"
+        # The panel appears on its own with the first run, so the way to get
+        # rid of it has to be written on the panel itself.
+        log.border_subtitle = "l hides this panel, c clears it"
         log.can_focus = False
-        self.query_one("#tabs", TabsRow).can_focus = False
         for button in self.query("#actionbar Button"):
             button.can_focus = False
         self.query_one("#progress", ProgressBar).display = False
@@ -353,27 +400,29 @@ class UniscriptApp(App[None]):
         return all(word in haystack for word in self._query.lower().split())
 
     def _visible_tasks(self) -> list[Task]:
-        """Tasks passing the tab and the filter, in catalogue order."""
-        return [
-            task
-            for task in self.tasks
-            if self._matches(task)
-            and (self._active_category is None or task.category is self._active_category)
-        ]
+        """The tasks shown as rows right now: search results, or one level."""
+        if self._query:
+            return [task for task in self.tasks if self._matches(task)]
+        if self._active_category is None:
+            return []
+        in_category = [task for task in self.tasks if task.category is self._active_category]
+        if self._subcategory is not None:
+            return [task for task in in_category if task.subcategory == self._subcategory]
+        return [task for task in in_category if task.subcategory is None]
 
-    def _category_of_highlight(self) -> Category | None:
-        widget = self.query_one("#tasks", TaskList)
-        index = widget.highlighted
-        if index is None:
+    def _group_of_highlight(self) -> tuple[Category, str | None] | None:
+        """The (category, subcategory) group the cursor is in."""
+        value = self.query_one("#tasks", TaskList)._highlighted_value()
+        if value is None or value == _UP_VALUE:
             return None
-        try:
-            value = widget.get_option_at_index(index).value
-        except Exception:
+        if value.startswith(_DIR_PREFIX):
+            if self._active_category is None:
+                return None
+            return self._active_category, value.removeprefix(_DIR_PREFIX)
+        task = self._task_by_id(value)
+        if task is None:
             return None
-        if isinstance(value, str) and value.startswith(_HEADER_PREFIX):
-            return Category.__members__.get(value.removeprefix(_HEADER_PREFIX))
-        task = self._task_by_id(value) if isinstance(value, str) else None
-        return task.category if task else None
+        return task.category, task.subcategory
 
     def _task_prompt(self, task: Task) -> str:
         # One-character flags keep the titles in a straight column; the legend
@@ -392,39 +441,86 @@ class UniscriptApp(App[None]):
             title = f"[$text-muted]{title}[/]"
         return f"{marker} {title}"
 
-    def _refresh_task_list(self) -> None:
-        widget = self.query_one("#tasks", TaskList)
+    def _search_entries(self) -> list[Selection[str]]:
+        """Search results as one flat list with a header per group."""
         visible = self._visible_tasks()
-        previous = widget.highlighted
-        rows: list[Task | None] = []
+        counts: dict[tuple[Category, str | None], int] = {}
+        for task in visible:
+            key = (task.category, task.subcategory)
+            counts[key] = counts.get(key, 0) + 1
         entries: list[Selection[str]] = []
-        current: Category | None = None
-        counts: dict[Category, int] = {}
+        current: tuple[Category, str | None] | None = None
         for task in visible:
-            counts[task.category] = counts.get(task.category, 0) + 1
-        for task in visible:
-            # On a category tab the tab itself is the header.
-            if self._active_category is None and task.category is not current:
+            key = (task.category, task.subcategory)
+            if key != current:
+                value = f"{_HEADER_PREFIX}{task.category.name}:{task.subcategory or ''}"
                 if current is not None:
                     # A blank line between the groups, so a long list still reads
                     # as sections rather than as one wall of titles.
-                    entries.append(
-                        Selection("", f"{_HEADER_PREFIX}gap:{task.category.name}", False, disabled=True)
-                    )
-                    rows.append(None)
-                current = task.category
+                    entries.append(Selection("", f"{_GAP_PREFIX}{value}", False, disabled=True))
+                current = key
+                label = task.category.label.upper()
+                if task.subcategory:
+                    label += f" › {task.subcategory.upper()}"
                 entries.append(
                     Selection(
-                        f"[b $text-accent]{escape(current.label.upper())}[/]"
-                        f"  [$text-muted]{counts[current]}[/]",
-                        f"{_HEADER_PREFIX}{current.name}",
+                        f"[b $text-accent]{escape(label)}[/]  [$text-muted]{counts[key]}[/]",
+                        value,
                         False,
                         disabled=True,
                     )
                 )
-                rows.append(None)
             entries.append(Selection(self._task_prompt(task), task.id, task.id in self.selected))
-            rows.append(task)
+        return entries
+
+    def _dir_prompt(self, subcategory: str, tasks: list[Task]) -> str:
+        chosen = sum(1 for task in tasks if task.id in self.selected)
+        prompt = f"[$text-accent]▸[/] [b]{escape(subcategory)}[/]  [$text-muted]{len(tasks)}[/]"
+        if chosen:
+            prompt += f"  [$text-accent]{chosen} ✓[/]"
+        return prompt
+
+    def _level_entries(self) -> list[Selection[str]]:
+        """One directory level of the active category, linutil style."""
+        if self._active_category is None:
+            return []
+        in_category = [task for task in self.tasks if task.category is self._active_category]
+        # Ordered as in the catalogue.
+        subcategories: list[str] = []
+        for task in in_category:
+            if task.subcategory and task.subcategory not in subcategories:
+                subcategories.append(task.subcategory)
+        if self._subcategory is not None and self._subcategory not in subcategories:
+            self._subcategory = None
+        entries: list[Selection[str]] = []
+        if self._subcategory is None:
+            for subcategory in subcategories:
+                inside = [task for task in in_category if task.subcategory == subcategory]
+                entries.append(
+                    Selection(
+                        self._dir_prompt(subcategory, inside),
+                        f"{_DIR_PREFIX}{subcategory}",
+                        False,
+                    )
+                )
+            for task in in_category:
+                if task.subcategory is None:
+                    entries.append(
+                        Selection(self._task_prompt(task), task.id, task.id in self.selected)
+                    )
+        else:
+            entries.append(Selection("[$text-muted]‹ ..[/]", _UP_VALUE, False))
+            for task in in_category:
+                if task.subcategory == self._subcategory:
+                    entries.append(
+                        Selection(self._task_prompt(task), task.id, task.id in self.selected)
+                    )
+        return entries
+
+    def _refresh_task_list(self) -> None:
+        widget = self.query_one("#tasks", TaskList)
+        previous = widget.highlighted
+        entries = self._search_entries() if self._query else self._level_entries()
 
         self._syncing = True
         try:
@@ -433,17 +529,29 @@ class UniscriptApp(App[None]):
         finally:
             self._syncing = False
 
-        self._refresh_match_count(len(visible))
-        selectable = [index for index, task in enumerate(rows) if task is not None]
-        if not selectable:
+        self._refresh_breadcrumb()
+        self._refresh_match_count(len(self._visible_tasks()))
+        reachable = [index for index, entry in enumerate(entries) if not entry.disabled]
+        if not reachable:
             self._show_detail(None)
             return
-        target = min(previous or selectable[0], len(rows) - 1)
-        if rows[target] is None:
-            # Landed on a header, take the nearest real task below it.
-            target = next((index for index in selectable if index >= target), selectable[0])
+        target = min(previous if previous is not None else reachable[0], len(entries) - 1)
+        if entries[target].disabled:
+            # Landed on a header, take the nearest reachable row below it.
+            target = next((index for index in reachable if index >= target), reachable[0])
         widget.highlighted = target
-        self._show_detail(rows[target])
+        self._show_detail_for_value(str(entries[target].value))
+
+    def _refresh_breadcrumb(self) -> None:
+        widget = self.query_one("#tasks", TaskList)
+        if self._query:
+            widget.border_title = "Search results"
+        elif self._active_category is None:
+            widget.border_title = "Tasks"
+        elif self._subcategory is not None:
+            widget.border_title = f"{self._active_category.label} › {self._subcategory}"
+        else:
+            widget.border_title = self._active_category.label
 
     def _refresh_match_count(self, matching: int) -> None:
         # The selected count lives on the run button, so this stays about the view.
@@ -512,6 +620,59 @@ class UniscriptApp(App[None]):
 
         target.update("\n".join(lines))
 
+    def _show_dir_detail(self, subcategory: str) -> None:
+        target = self.query_one("#detail-content", Static)
+        tasks = [
+            task
+            for task in self.tasks
+            if task.category is self._active_category and task.subcategory == subcategory
+        ]
+        lines = [f"[b]{escape(subcategory)}[/]", ""]
+        lines.append(
+            f"[$text-muted]{len(tasks)} applications. Press right or enter to open "
+            "the group, a selects all of it.[/]"
+        )
+        lines.append("")
+        for task in tasks:
+            marker = "[$text-success]✓[/]" if self._applied.get(task.id) else " "
+            title = escape(task.title)
+            if task.id in self.selected:
+                title = f"[b]{title}[/]"
+            lines.append(f"  {marker} {title}[$text-muted]: {escape(task.summary)}[/]")
+        target.update("\n".join(lines))
+
+    def _show_detail_for_value(self, value: str) -> None:
+        if value == _UP_VALUE and self._active_category is not None:
+            self.query_one("#detail-content", Static).update(
+                f"[$text-muted]Back to {escape(self._active_category.label)}.[/]"
+            )
+        elif value.startswith(_DIR_PREFIX):
+            self._show_dir_detail(value.removeprefix(_DIR_PREFIX))
+        else:
+            self._show_detail(self._task_by_id(value))
+
+    # --- directory navigation -------------------------------------------------
+
+    def _enter_dir(self, subcategory: str) -> None:
+        self._subcategory = subcategory
+        self._refresh_task_list()
+        widget = self.query_one("#tasks", TaskList)
+        # Past the ".." row, straight onto the first application.
+        if widget.option_count > 1:
+            widget.highlighted = 1
+
+    def _go_up(self) -> None:
+        left = self._subcategory
+        self._subcategory = None
+        self._refresh_task_list()
+        if left is None:
+            return
+        widget = self.query_one("#tasks", TaskList)
+        for index in range(widget.option_count):
+            if str(widget.get_option_at_index(index).value) == f"{_DIR_PREFIX}{left}":
+                widget.highlighted = index
+                break
+
     def _refresh_status(self) -> None:
         mode = self.query_one("#status-mode", Label)
         if self.dry_run:
@@ -524,9 +685,12 @@ class UniscriptApp(App[None]):
         dry.label = f"Dry run: {'on' if self.dry_run else 'OFF'} (d)"
         dry.set_class(not self.dry_run, "-live")
         run = self.query_one("#act-run", Button)
-        run.label = f"▶ Run selected: {pending} (r)"
+        run.label = f"▶ Run {pending} (r)"
         # Nothing selected means nothing to run; a lit green button would lie.
         run.disabled = pending == 0 or self._busy
+        sidebar = self.query_one("#sidebar", OptionList)
+        for category in self.categories:
+            sidebar.replace_option_prompt(category.name, self._sidebar_prompt(category))
         self._refresh_match_count(len(self._visible_tasks()))
 
     def _log(self, level: str, message: str) -> None:
@@ -547,7 +711,7 @@ class UniscriptApp(App[None]):
             return
         visible = {task.id for task in self._visible_tasks()}
         chosen = {
-            value for value in event.selection_list.selected if not value.startswith(_HEADER_PREFIX)
+            value for value in event.selection_list.selected if not value.startswith("\x00")
         }
         self.selected -= visible - chosen
         self.selected |= chosen
@@ -555,23 +719,30 @@ class UniscriptApp(App[None]):
 
     @on(SelectionList.SelectionHighlighted, "#tasks")
     def _selection_highlighted(self, event: SelectionList.SelectionHighlighted[str]) -> None:
-        task = self._task_by_id(event.selection.value)
-        if task is not None:
-            self._show_detail(task)
+        self._show_detail_for_value(str(event.selection.value))
 
-    @on(Tabs.TabActivated, "#tabs")
-    def _tab_changed(self, event: Tabs.TabActivated) -> None:
-        name = (event.tab.id or "").removeprefix("tab-")
-        self._active_category = Category.__members__.get(name)
+    @on(OptionList.OptionHighlighted, "#sidebar")
+    def _category_changed(self, event: OptionList.OptionHighlighted) -> None:
+        category = Category.__members__.get(event.option.id or "")
+        if category is None or category is self._active_category:
+            return
+        self._active_category = category
+        self._subcategory = None
+        if self._query:
+            # Picking a category leaves the search; clearing the input refreshes.
+            self.query_one("#search", Input).value = ""
+            return
         self._refresh_task_list()
+
+    @on(OptionList.OptionSelected, "#sidebar")
+    def _category_selected(self, event: OptionList.OptionSelected) -> None:
+        # Enter on the category list hands the keyboard to the tasks,
+        # the way l and Right do in linutil.
+        self.query_one("#tasks", TaskList).focus()
 
     @on(Input.Changed, "#search")
     def _search_changed(self, event: Input.Changed) -> None:
         self._query = event.value.strip()
-        # A search is global; a category tab would silently hide most matches.
-        if self._query and self._active_category is not None:
-            self.query_one("#tabs", TabsRow).active = "tab-ALL"
-            return  # the tab handler refreshes the list
         self._refresh_task_list()
 
     @on(Input.Submitted, "#search")
@@ -581,7 +752,17 @@ class UniscriptApp(App[None]):
     @on(TaskList.HeaderClicked)
     def _header_clicked(self, event: TaskList.HeaderClicked) -> None:
         if not self._busy:
-            self._toggle_group(event.category)
+            self._toggle_group(event.category, event.subcategory)
+
+    @on(TaskList.DirEntered)
+    def _dir_entered(self, event: TaskList.DirEntered) -> None:
+        if not self._busy:
+            self._enter_dir(event.subcategory)
+
+    @on(TaskList.WentUp)
+    def _went_up(self, event: TaskList.WentUp) -> None:
+        if not self._busy:
+            self._go_up()
 
     @on(Button.Pressed, "#act-run")
     def _button_run(self) -> None:
@@ -660,33 +841,58 @@ class UniscriptApp(App[None]):
             timeout=4,
         )
 
-    def _toggle_group(self, category: Category) -> None:
+    def _toggle_group(self, category: Category, subcategory: str | None) -> None:
         """Select the whole group, or clear it when it is already selected."""
+        label = f"{category.label} › {subcategory}" if subcategory else category.label
         ids = {
             task.id
-            for task in self._visible_tasks()
-            if task.category is category and not self._applied.get(task.id)
+            for task in self.tasks
+            if task.category is category
+            and task.subcategory == subcategory
+            and self._matches(task)
+            and not self._applied.get(task.id)
         }
         if not ids:
             return
         if ids <= self.selected:
-            self._apply_preset(self.selected - ids, f"group cleared: {category.label}")
+            self._apply_preset(self.selected - ids, f"group cleared: {label}")
         else:
-            self._apply_preset(self.selected | ids, f"whole group: {category.label}")
+            self._apply_preset(self.selected | ids, f"whole group: {label}")
 
     def action_select_category(self) -> None:
-        category = self._category_of_highlight()
-        if category is not None:
-            self._toggle_group(category)
+        group = self._group_of_highlight()
+        if group is not None:
+            self._toggle_group(*group)
 
     def action_search(self) -> None:
         self.query_one("#search", Input).focus()
 
-    def action_prev_tab(self) -> None:
-        self.query_one("#tabs", TabsRow).action_previous_tab()
+    def action_nav_left(self) -> None:
+        # The way back: out of a subcategory first, then onto the sidebar.
+        if self._busy:
+            return
+        tasks = self.query_one("#tasks", TaskList)
+        if not tasks.has_focus:
+            return
+        if self._subcategory is not None and not self._query:
+            self._go_up()
+        else:
+            self.query_one("#sidebar", OptionList).focus()
 
-    def action_next_tab(self) -> None:
-        self.query_one("#tabs", TabsRow).action_next_tab()
+    def action_nav_right(self) -> None:
+        # The way in: from the sidebar to the list, from a directory row into it.
+        if self._busy:
+            return
+        sidebar = self.query_one("#sidebar", OptionList)
+        if sidebar.has_focus:
+            self.query_one("#tasks", TaskList).focus()
+            return
+        tasks = self.query_one("#tasks", TaskList)
+        if not tasks.has_focus:
+            return
+        value = tasks._highlighted_value()
+        if value is not None and value.startswith(_DIR_PREFIX):
+            self._enter_dir(value.removeprefix(_DIR_PREFIX))
 
     def action_clear_selection(self) -> None:
         self._apply_preset(set(), "selection cleared")
@@ -896,7 +1102,7 @@ class UniscriptApp(App[None]):
     def _set_controls_enabled(self, enabled: bool) -> None:
         self.query_one("#tasks", TaskList).disabled = not enabled
         self.query_one("#search", Input).disabled = not enabled
-        self.query_one("#tabs", TabsRow).disabled = not enabled
+        self.query_one("#sidebar", OptionList).disabled = not enabled
         for button in self.query("#actionbar Button"):
             button.disabled = not enabled
 

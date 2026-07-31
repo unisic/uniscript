@@ -1,12 +1,12 @@
-/* Palety siedza w app.py (DARK_THEME, LIGHT_THEME) i przenosza kolory ciemnego
-   motywu WinUtila. Tutaj tylko uklad; wszystkie kolory przez zmienne motywu,
-   zeby jasna paleta dzialala z tego samego arkusza. */
+/* Palety siedza w app.py (DARK_THEME, LIGHT_THEME) i przenosza Tokyo Night.
+   Tutaj tylko uklad; wszystkie kolory przez zmienne motywu, zeby jasna paleta
+   dzialala z tego samego arkusza. */
 
 Screen {
     background: $background;
 }
 
-/* Gorny pasek: marka po lewej, szukanie w srodku, licznik po prawej. */
+/* Gorny pasek: marka, szukanie, licznik dopasowan, wykryty system. */
 
 #topbar {
     height: 1;
@@ -15,8 +15,8 @@ Screen {
 
 #brand {
     width: auto;
-    padding: 0 2;
-    color: $accent;
+    padding: 0 2 0 1;
+    color: $foreground;
     text-style: bold;
 }
 
@@ -40,44 +40,73 @@ Screen {
     color: $text-muted;
 }
 
-/* Zakladki kategorii, jak pasek Install / Tweaks / Config w WinUtilu. */
-
-#tabs {
-    height: 2;
-    background: $background;
-    margin: 0 1;
+#sysinfo {
+    width: auto;
+    max-width: 40;
+    padding: 0 1;
+    color: $text-muted;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
 }
 
-/* Panele obok siebie: lista po lewej, opis po prawej. */
+#sysinfo:hover {
+    color: $text;
+}
+
+/* Trzy panele jak w linutil: kategorie, lista, opis. Odstep miedzy nimi,
+   zeby kazdy czytal sie jako osobna karta. */
 
 #workspace {
     height: 1fr;
+    padding: 0 1;
 }
 
-#tasks, #detail {
-    border: round $panel-lighten-1;
+#sidebar, #tasks, #detail {
+    border: round $panel;
     border-title-color: $text-accent;
     border-title-style: bold;
     border-subtitle-color: $text-muted;
     background: $surface;
+    scrollbar-size-vertical: 1;
     scrollbar-background: $surface;
     scrollbar-background-hover: $surface;
     scrollbar-background-active: $surface;
-    scrollbar-color: $panel-lighten-2;
+    scrollbar-color: $panel;
     scrollbar-color-hover: $btn-hover;
     scrollbar-color-active: $primary;
 }
 
-#tasks:focus, #detail:focus {
+#sidebar:focus, #tasks:focus, #detail:focus {
     border: round $accent;
+}
+
+#sidebar {
+    width: 20;
+    height: 100%;
+    margin-right: 1;
+    padding: 0;
+}
+
+/* Aktywna kategoria jest widoczna takze bez fokusu; fokus ja rozjasnia. */
+
+#sidebar > .option-list--option-highlighted {
+    background: $btn-bg;
+}
+
+#sidebar:focus > .option-list--option-highlighted {
+    background: $primary 25%;
+}
+
+#sidebar > .option-list--option-hover {
+    background: $btn-hover 50%;
 }
 
 #tasks {
     width: 3fr;
-    min-width: 40;
+    min-width: 36;
     height: 100%;
+    margin-right: 1;
     padding: 0 1;
-    scrollbar-size-vertical: 1;
 }
 
 #detail {
@@ -85,41 +114,39 @@ Screen {
     min-width: 28;
     overflow-x: hidden;
     padding: 1 2;
-    scrollbar-size-vertical: 1;
 }
-
-/* Widoczne puste pudelko to "niezaznaczone", niebieski X w kolorze wlacznika
-   WinUtila to "zaznaczone". Tlo pudelka jest zawsze takie samo, zeby ruch
-   kursora nie wygladal jak zmiana stanu. */
 
 #tasks > .option-list--option-hover {
     background: $btn-hover 50%;
 }
 
+/* Widoczne puste pudelko to "niezaznaczone", niebieski X to "zaznaczone".
+   Tlo pudelka jest zawsze takie samo, zeby ruch kursora nie wygladal jak
+   zmiana stanu. */
+
 #tasks > .selection-list--button,
 #tasks > .selection-list--button-highlighted {
-    color: $panel-lighten-1;
-    background: $panel-lighten-1;
+    color: $btn-bg;
+    background: $btn-bg;
 }
 
 #tasks > .selection-list--button-selected,
 #tasks > .selection-list--button-selected-highlighted {
     color: $toggle-on;
-    background: $panel-lighten-1;
+    background: $btn-bg;
 }
 
-/* Pasek akcji na dole, odpowiednik przyciskow WinUtila. Pelna wysokosc
-   przycisku, zeby uruchomienie bylo widoczne od progu. */
+/* Pasek akcji: jedna linia, glowna akcja w kolorze sukcesu. */
 
 #actionbar {
-    height: 3;
+    height: 1;
     background: $panel;
     padding: 0 1;
 }
 
 #actionbar Button {
     width: auto;
-    height: 100%;
+    height: 1;
     margin: 0 1 0 0;
     padding: 0 2;
     border: none;
@@ -130,8 +157,6 @@ Screen {
 #actionbar Button:hover {
     background: $btn-hover;
 }
-
-/* Glowna akcja: zielona, gasnie kiedy nie ma nic do uruchomienia. */
 
 #actionbar #act-run {
     background: $success;
@@ -154,19 +179,6 @@ Screen {
 #actionbar #act-dry.-live {
     color: $text-warning;
     text-style: bold;
-}
-
-#sysinfo {
-    width: 1fr;
-    content-align: right middle;
-    padding: 0 1;
-    color: $text-muted;
-    text-wrap: nowrap;
-    text-overflow: ellipsis;
-}
-
-#sysinfo:hover {
-    color: $text;
 }
 
 /* Konsola: ukryta do pierwszego uruchomienia. */
@@ -197,15 +209,16 @@ Screen {
 
 #log {
     height: 1fr;
-    border: round $panel-lighten-1;
+    border: round $panel;
     border-title-color: $text-accent;
     border-title-style: bold;
     background: $surface;
+    margin: 0 1;
     padding: 0 1;
     overflow-x: hidden;
     scrollbar-size-vertical: 1;
     scrollbar-background: $surface;
-    scrollbar-color: $panel-lighten-2;
+    scrollbar-color: $panel;
     scrollbar-color-hover: $btn-hover;
     scrollbar-color-active: $primary;
 }
@@ -257,7 +270,7 @@ PlanScreen, PromptScreen, SummaryScreen, SystemScreen, HelpScreen {
 
 #plan-body, #summary-body, #system-body, #help-body {
     height: 1fr;
-    border: round $panel-lighten-1;
+    border: round $panel;
     padding: 0 1;
     margin-bottom: 1;
 }

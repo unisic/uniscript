@@ -245,7 +245,9 @@ class HelpScreen(ModalScreen[None]):
 
     HELP = """[b]Navigation[/]
   [$accent]up, down[/]        move through the list
-  [$accent]left, right[/]     switch the category tab
+  [$accent]right, enter[/]    open the group under the cursor; from the
+                  category list, jump to the tasks
+  [$accent]left[/]            back out of a group, then to the category list
   [$accent]space[/]           select or deselect a task
   [$accent]/[/]               search everywhere, escape clears it
   [$accent]shift+arrows[/]    scroll the description (the wheel works too)
@@ -259,10 +261,10 @@ class HelpScreen(ModalScreen[None]):
   [$accent]n[/]               deselect everything
 
 [b]Mouse[/]
-  A click ticks a task, a click on a group header ticks the whole group,
-  and the buttons at the bottom mirror the r, d, e and g keys. The wheel
-  scrolls the panel under the pointer; over the tab bar it switches tabs.
-  Inside tmux the mouse needs "set -g mouse on" in tmux.conf.
+  A click ticks a task, a click on a group row opens it, a click on a
+  search result header ticks the whole group, and the buttons at the
+  bottom mirror the r, d, e and g keys. The wheel scrolls the panel
+  under the pointer. Inside tmux the mouse needs "set -g mouse on".
 
 [b]Running[/]
   [$accent]r[/]               show the plan and run
