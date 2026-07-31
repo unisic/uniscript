@@ -90,15 +90,17 @@ still asked there, never in the browser.
 
 ## The catalogue
 
-140 tasks; only those matching the machine are shown. On the test machine that
-is 104 on Fedora, 98 on Ubuntu, 97 on Arch and 92 on openSUSE; `--list` prints
-the exact set for yours. Shared across families: Flatpak and Flathub,
-applications one per task in groups (including Helium from the developers' own
-repo or AppImage), the gaming stack, kernel and IO tuning, zram, encrypted
-DNS, firewall, package and Flatpak maintenance, shells. Per family: RPM
-Fusion, COPR, Terra and the NVIDIA driver on Fedora; Firefox from Mozilla
-instead of the snap, universe/multiverse and drivers on Debian and Ubuntu; an
-AUR helper, multilib and pacman tuning on Arch; Packman codecs on openSUSE.
+About 140 tasks; only those matching the machine are shown. On the test
+machine that is 104 on Fedora, 101 on Ubuntu, 100 on Arch and 95 on openSUSE;
+`--list` prints the exact set for yours. Shared across families: Flatpak and
+Flathub, applications one per task in groups (including Helium from the
+developers' own repo or AppImage), the gaming stack, kernel and IO tuning,
+zram, encrypted DNS, firewall, package and Flatpak maintenance, shells. Per
+family: RPM Fusion, Terra, the NVIDIA driver and COPR with search and installs
+on Fedora; PPAs with installs, Firefox from Mozilla instead of the snap,
+universe/multiverse and drivers on Debian and Ubuntu; an AUR helper plus AUR
+installs with search, multilib and pacman tuning on Arch; Packman codecs and
+opi on openSUSE.
 
 Worth knowing: the Ubuntu snap-removal task removes every snap and swaps
 Firefox for the Mozilla build, so you are not left without a browser. Shells

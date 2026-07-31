@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import re
+
 from ..core.context import ExecContext
 from ..core.system import System
 from ..core.tasks import (
     Category,
     Custom,
+    InputPrompt,
     Install,
     Note,
     Risk,
@@ -57,6 +60,47 @@ async def _mozilla_pref_content(ctx: ExecContext) -> str:
 
 async def _mozilla_list_content(ctx: ExecContext) -> str:
     return HEADER + f"deb [signed-by={MOZILLA_KEY}] https://packages.mozilla.org/apt mozilla main\n"
+
+
+_PPA_NAME = re.compile(r"^ppa:[a-z0-9][a-z0-9.+-]*/[a-z0-9][a-z0-9.+-]*$")
+_PACKAGE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9@._+-]*$")
+
+
+def _ppa_input_valid(value: str) -> str | None:
+    tokens = value.replace(",", " ").split()
+    ppas = [token for token in tokens if token.startswith("ppa:")]
+    if not ppas:
+        return "At least one entry has to look like ppa:owner/name."
+    bad = [token for token in ppas if not _PPA_NAME.match(token)]
+    if bad:
+        return f"Not a PPA name: {' '.join(bad)}"
+    bad = [
+        token
+        for token in tokens
+        if not token.startswith("ppa:") and not _PACKAGE_NAME.match(token)
+    ]
+    if bad:
+        return f"Not a package name: {' '.join(bad)}"
+    return None
+
+
+async def _enable_ppa(ctx: ExecContext) -> None:
+    value = ctx.input_value()
+    if not value:
+        ctx.log("no PPA name was given", "warn")
+        return
+    tokens = value.replace(",", " ").split()
+    ppas = [token for token in tokens if token.startswith("ppa:")]
+    packages = [token for token in tokens if not token.startswith("ppa:")]
+    for ppa in ppas:
+        await ctx.run(["add-apt-repository", "-y", ppa], root=True, timeout=300.0)
+    await ctx.run(["apt-get", "update"], root=True, allow_fail=True)
+    if packages:
+        await ctx.run(
+            ["apt-get", "install", "-y", *packages],
+            root=True,
+            timeout=min(3600.0, 600.0 + 60.0 * len(packages)),
+        )
 
 
 async def _enable_debian_components(ctx: ExecContext) -> None:
@@ -276,7 +320,40 @@ def build(system: System) -> list[Task]:
                 available=lambda sys_: _is_ubuntu(sys_),
             )
         )
-    else:
+        tasks.append(
+            Task(
+                id="ubuntu-ppa",
+                title="Enable a PPA and install from it",
+                summary="Adds the Launchpad PPAs you name and installs the packages you list.",
+                category=Category.REPOS,
+                risk=Risk.MEDIUM,
+                warning=(
+                    "A PPA is one person's package archive on Launchpad. Nobody reviews "
+                    "the contents. Only enable archives whose owner you trust."
+                ),
+                details=[
+                    "Entries starting with ppa: are archives, the rest are package names "
+                    "installed after the archives are enabled.",
+                    "Example: ppa:mozillateam/ppa firefox-esr adds the archive and "
+                    "installs the package in one go.",
+                    "Remove one later with: sudo add-apt-repository --remove ppa:owner/name.",
+                ],
+                prompt=InputPrompt(
+                    label="PPAs (ppa:owner/name) and packages to install",
+                    placeholder="for example ppa:mozillateam/ppa firefox-esr",
+                    validator=_ppa_input_valid,
+                ),
+                steps=[
+                    Install(["software-properties-common"], optional=True),
+                    Custom(
+                        "enables the PPAs you named and installs the packages",
+                        _enable_ppa,
+                    ),
+                ],
+                available=lambda sys_: _is_ubuntu(sys_),
+            )
+        )
+    if not _is_ubuntu(system):
         tasks.append(
             Task(
                 id="debian-components",

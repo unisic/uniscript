@@ -80,6 +80,22 @@ def build(system: System) -> list[Task]:
             ],
         ),
         Task(
+            id="suse-opi",
+            title="opi: install packages from OBS and Packman",
+            summary="Installs opi, the community installer that searches the Build Service.",
+            category=Category.REPOS,
+            risk=Risk.MEDIUM,
+            details=[
+                "opi <name> searches the openSUSE Build Service and Packman, installs "
+                "your pick and adds the repository it came from.",
+                "Community OBS repositories are unreviewed; read what opi offers "
+                "before accepting.",
+                "Run it in a terminal afterwards: opi <package>, or opi codecs.",
+            ],
+            steps=[Install(["opi"])],
+            detect=lambda probe, sys_: probe.has_package("opi"),
+        ),
+        Task(
             id="suse-packman",
             title="Packman repository and the full codecs",
             summary="Adds Packman and switches the multimedia packages over to its builds.",

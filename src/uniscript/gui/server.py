@@ -21,7 +21,7 @@ import webbrowser
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlencode, urlsplit
+from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
 from ..catalog import build_tasks, categories_of, quick_setup_ids
 from ..core.backup import BackupStore
@@ -37,15 +37,18 @@ LOG_MAX_LINES = 5000
 COPR_API = "https://copr.fedorainfracloud.org/api_3"
 
 
-def _copr_get(path: str, params: dict[str, str]) -> dict:
-    """One bounded request to the public COPR API, errors become JSON."""
-    url = f"{COPR_API}/{path}?{urlencode(params)}"
+def _json_get(url: str) -> dict:
+    """One bounded request to a public package API, errors become JSON."""
     try:
-        # The search endpoint routinely needs more than ten seconds.
+        # The COPR search endpoint routinely needs more than ten seconds.
         with urllib.request.urlopen(url, timeout=25) as response:
             return json.load(response)
     except (urllib.error.URLError, TimeoutError, ValueError) as exc:
-        return {"error": f"COPR did not answer: {exc}"}
+        return {"error": f"the service did not answer: {exc}"}
+
+
+def _copr_get(path: str, params: dict[str, str]) -> dict:
+    return _json_get(f"{COPR_API}/{path}?{urlencode(params)}")
 
 
 def _copr_search(query: str) -> dict:
@@ -72,6 +75,26 @@ def _copr_packages(owner: str, project: str) -> dict:
     if "error" in data:
         return data
     return {"items": [item.get("name", "") for item in data.get("items", [])[:100]]}
+
+
+def _aur_search(query: str) -> dict:
+    if not query:
+        return {"items": []}
+    data = _json_get(f"https://aur.archlinux.org/rpc/v5/search/{quote(query)}")
+    if "error" in data:
+        return data
+    results = sorted(
+        data.get("results", []), key=lambda item: item.get("Popularity") or 0, reverse=True
+    )
+    return {
+        "items": [
+            {
+                "name": item.get("Name", ""),
+                "description": (item.get("Description") or "").strip()[:120],
+            }
+            for item in results[:20]
+        ]
+    }
 
 
 class LogRing:
@@ -381,6 +404,8 @@ class _Handler(BaseHTTPRequestHandler):
             )
         elif url.path == "/api/copr/search":
             self._send_json(_copr_search((query.get("q") or [""])[0].strip()))
+        elif url.path == "/api/aur/search":
+            self._send_json(_aur_search((query.get("q") or [""])[0].strip()))
         elif url.path == "/api/copr/packages":
             self._send_json(
                 _copr_packages(

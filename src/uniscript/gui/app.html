@@ -366,13 +366,21 @@ function openPlan() {
           <input type="search" id="copr-q" placeholder="project or package name">
           <button type="button" id="copr-go">Search</button>
         </div>
-        <div id="copr-results"></div></div>` : "");
+        <div id="copr-results"></div></div>` : "") +
+      (t.id === "arch-aur-install" ? `<div class="coprbox">
+        <label for="aur-q">Search the AUR</label>
+        <div class="qbar">
+          <input type="search" id="aur-q" placeholder="package name">
+          <button type="button" id="aur-go">Search</button>
+        </div>
+        <div id="aur-results"></div></div>` : "");
   html += `</div><div class="dfoot">
     <button id="p-cancel">Cancel</button>
     <button class="run" id="p-run">${dryRun ? "Dry run" : "Run"}</button></div>`;
   $("dlg-plan").innerHTML = html;
   $("dlg-plan").showModal();
   wireCoprSearch();
+  wireAurSearch();
   $("p-cancel").onclick = () => $("dlg-plan").close();
   $("p-run").onclick = async () => {
     const inputs = {};
@@ -437,6 +445,43 @@ function wireCoprSearch() {
   };
   go.onclick = search;
   $("copr-q").onkeydown = (event) => {
+    if (event.key === "Enter") { event.preventDefault(); search(); }
+  };
+}
+
+function wireAurSearch() {
+  const go = $("aur-go");
+  if (!go) return;
+  const input = $("in-arch-aur-install");
+  const results = $("aur-results");
+  const muted = (text) => { results.innerHTML = `<span style="color:var(--muted)">${esc(text)}</span>`; };
+  const tokens = () => input.value.split(/[\s,]+/).filter(Boolean);
+  const search = async () => {
+    const query = $("aur-q").value.trim();
+    if (!query) return;
+    muted("searching...");
+    const response = await fetch(api("/api/aur/search?q=" + encodeURIComponent(query)));
+    const data = await response.json();
+    if (data.error) { results.innerHTML = `<span class="fail">${esc(data.error)}</span>`; return; }
+    if (!data.items.length) { muted("nothing found"); return; }
+    results.innerHTML = `<span style="color:var(--muted)">click a package to add or remove it:</span>` +
+      data.items.map((p) => `<div class="qrow"><button type="button" class="chip"
+        data-pkg="${esc(p.name)}">${esc(p.name)}</button><span class="why">${esc(p.description)}</span></div>`).join("");
+    const repaint = () => { for (const chip of results.querySelectorAll(".chip"))
+      chip.classList.toggle("picked", tokens().includes(chip.dataset.pkg)); };
+    for (const chip of results.querySelectorAll(".chip"))
+      chip.onclick = () => {
+        const pkg = chip.dataset.pkg;
+        const current = tokens();
+        input.value = (current.includes(pkg)
+          ? current.filter((x) => x !== pkg)
+          : [...current, pkg]).join(" ");
+        repaint();
+      };
+    repaint();
+  };
+  go.onclick = search;
+  $("aur-q").onkeydown = (event) => {
     if (event.key === "Enter") { event.preventDefault(); search(); }
   };
 }

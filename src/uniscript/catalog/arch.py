@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 from collections.abc import Awaitable, Callable
 
 from ..core.context import ExecContext
@@ -10,6 +11,7 @@ from ..core.system import System
 from ..core.tasks import (
     Category,
     Custom,
+    InputPrompt,
     Install,
     Note,
     Risk,
@@ -118,6 +120,34 @@ def _aur_helper_builder(binary: str, package: str) -> Callable[[ExecContext], Aw
         )
 
     return build_helper
+
+
+_PACKAGE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9@._+-]*$")
+
+
+def _package_names_valid(value: str) -> str | None:
+    tokens = value.replace(",", " ").split()
+    bad = [token for token in tokens if not _PACKAGE_NAME.match(token)]
+    if bad:
+        return f"Not a package name: {' '.join(bad)}"
+    return None
+
+
+async def _aur_install(ctx: ExecContext) -> None:
+    value = ctx.input_value()
+    if not value:
+        ctx.log("no package name was given", "warn")
+        return
+    packages = value.replace(",", " ").split()
+    # The snapshot in system.tools predates a helper installed this session.
+    helper = next((name for name in ("paru", "yay") if shutil.which(name)), None)
+    if helper is None:
+        ctx.note("No AUR helper was found. Run the paru or yay task first, then this one.")
+        return
+    await ctx.run_interactive(
+        [helper, "-S", "--needed", *packages],
+        f"{helper} shows each PKGBUILD and asks for the sudo password on the terminal",
+    )
 
 
 def _driver_steps(system: System) -> list[Step]:
@@ -299,6 +329,32 @@ def build(system: System) -> list[Task]:
                 ),
             ],
             detect=lambda probe, sys_: sys_.has("yay"),
+        ),
+        Task(
+            id="arch-aur-install",
+            title="Install packages from the AUR",
+            summary="Builds the AUR packages you name, through paru or yay.",
+            category=Category.REPOS,
+            risk=Risk.MEDIUM,
+            warning=AUR_WARNING,
+            details=[
+                "Needs an AUR helper; the paru or yay task installs one.",
+                "The interface is suspended for the build: the helper shows every "
+                "PKGBUILD and asks for the sudo password on the terminal.",
+                "The browser GUI can search the AUR by name.",
+            ],
+            prompt=InputPrompt(
+                label="AUR packages to install",
+                placeholder="for example spotify visual-studio-code-bin",
+                validator=_package_names_valid,
+            ),
+            steps=[
+                Custom(
+                    "builds the named AUR packages with paru or yay",
+                    _aur_install,
+                    root=False,
+                )
+            ],
         ),
         Task(
             id="arch-codecs",
