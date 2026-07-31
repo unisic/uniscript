@@ -1,170 +1,111 @@
 # uniscript
 
-Post-install Linux configuration, driven from the terminal.
-The script detects the distribution, the package manager and the hardware, then
-shows a list of tasks matched to that particular machine: repositories, drivers,
-codecs, Flatpak, a gaming set, shell switching and conservative tweaks.
+Post-install Linux configuration, driven from the terminal. It detects the
+distribution, the package manager and the hardware, then shows only the tasks
+that fit the machine: repositories, drivers, codecs, applications, gaming,
+shell switching, conservative tweaks and maintenance. Nothing happens on its
+own: you pick the tasks, read the exact commands, then confirm.
 
-Nothing happens on its own. You pick the tasks, you read the full plan of
-commands, and only then you run it.
-
-## Early version, read this first
-
-This is version 0.1.0 and it should be treated as such. It installs packages,
-adds repositories, edits files under `/etc` and changes your login shell, so a
-mistake here costs more than a mistake in an ordinary program.
-
-Only Fedora has been run on a live machine. Debian, Ubuntu, Arch and openSUSE
-are written but never executed. The details are in
-[Verification status](#verification-status).
-
-- Start with `./uniscript --dry-run` and read the plan. Nothing runs until you
-  confirm it.
-- Have a way back. Every file change is backed up with a generated `restore.sh`,
-  but that is not a substitute for a system snapshot.
-- Do not run this on a production server or a machine you cannot reinstall.
-- Tasks marked `risk` can break the system or weaken its security. They are
-  never selected by default.
-
-Bug reports are welcome, especially from the untested distributions.
-
-## Requirements
-
-- Linux with systemd (another init works, the tasks touching services are
-  skipped)
-- Python 3.11 or newer
-- `sudo` or `doas` for the tasks that change the system
-- a network connection on the first run, to install
-  [Textual](https://github.com/Textualize/textual) (`textual>=8.0,<9.0`), the
-  only dependency
-
-The launcher puts Textual in a separate virtual environment in
-`${XDG_DATA_HOME:-$HOME/.local/share}/uniscript/venv` and never touches the
-system packages.
+**Version 0.2.0, read this first.** It installs packages, adds repositories and
+edits files under `/etc`, so treat it accordingly: start with `--dry-run`, have
+a snapshot or another way back, and keep it off machines you cannot reinstall.
+Only Fedora has been run on a live machine; Debian, Ubuntu, Arch and openSUSE
+are written but never executed ([details](#verification-status)). Tasks marked
+`risk` are never selected by default. Bug reports are welcome, especially from
+the untested distributions.
 
 ## Running it
 
-One line, clones the repository into `~/uniscript` and starts the interface:
+Requirements: Linux with systemd, Python 3.11+, `sudo` or `doas`, a network
+connection on the first run. The launcher installs the only dependency,
+[Textual](https://github.com/Textualize/textual), into its own venv under
+`~/.local/share/uniscript/venv` and never touches the system packages
+(`UNISCRIPT_SYSTEM_PYTHON=1` skips the venv).
+
+One line, clones into `~/uniscript` and starts; the `bash <(curl ...)` form
+matters, because the interface needs a terminal on standard input. Running it
+again updates the clone; `UNISCRIPT_DIR`, `UNISCRIPT_REPO` and
+`UNISCRIPT_BRANCH` override the defaults:
 
 ```sh
 bash <(curl -fsSL https://raw.githubusercontent.com/unisic/uniscript/main/install.sh)
 ```
 
-Running it again updates the clone with `git merge --ff-only`. The target path,
-the repository and the branch can be overridden with `UNISCRIPT_DIR`,
-`UNISCRIPT_REPO` and `UNISCRIPT_BRANCH`. The `bash <(curl ...)` form matters:
-with `curl | bash` the pipe takes standard input and the interface needs a
-terminal.
-
-With the repository already cloned:
+From a clone:
 
 ```sh
-./uniscript                       # first start also creates the environment
-./uniscript --dry-run             # changes nothing, prints commands and diffs
-UNISCRIPT_SYSTEM_PYTHON=1 ./uniscript   # use the system Python instead
+./uniscript                              # asks: TUI or browser GUI; first start creates the venv
+./uniscript --tui                        # straight to the terminal interface
+./uniscript --gui                        # straight to the browser GUI
+./uniscript-gui                          # the GUI without the venv (standard library only)
+./uniscript --dry-run                    # changes nothing, prints commands and diffs
+./uniscript --system                     # what was detected
+./uniscript --list                       # the available tasks and their ids
+./uniscript --plan fedora-rpmfusion      # the commands a task would run
+./uniscript --run fedora-rpmfusion --yes # headless; --dry-run and --input work here too
 ```
 
 ## The interface
 
-Category tabs across the top, the task list on the left, the description of the
-highlighted task on the right, action buttons at the bottom, and a log that
-appears when something starts running. The layout and the palette follow
-[WinUtil](https://github.com/ChrisTitusTech/winutil), translated to a terminal.
+Three panes, laid out like
+[linutil](https://github.com/ChrisTitusTech/linutil): categories on the left,
+tasks in the middle, the description on the right. Applications is browsed
+like a directory tree (Browsers, Development and so on), `..` leads back up.
+The palette is [Tokyo Night](https://github.com/folke/tokyonight.nvim); `t`
+switches between the dark and the day variant.
 
-| Key | Does |
+| Keys | Action |
 | --- | --- |
-| up, down | move through the list |
-| left, right | switch the category tab |
-| space | select or deselect a task |
+| arrows | move; right/enter opens a group, left backs out to the categories |
+| space, `a`, `n` | select a task, the whole group, nothing |
 | `/` | search everywhere, `esc` clears it |
-| shift+arrows | scroll the description (the wheel works too) |
-| `e` | the essentials set |
-| `g` | the gaming set |
-| `a` | select the whole group the cursor is in |
-| `n` | deselect everything |
-| `r` | show the plan and run |
-| `d` | toggle dry run |
-| `s` | details of the detected system |
-| `t` | switch between the dark and the light palette |
-| `l` | show or hide the log |
-| `c` | clear the log |
-| `?` | help |
-| `esc` | abort the work in progress |
-| `q` | quit |
+| `e`, `g` | the essentials or the gaming preset |
+| `r`, `d` | show the plan and run; toggle dry run |
+| shift+arrows | scroll the description |
+| `s`, `l`, `c`, `?`, `q` | system details, log, clear log, help, quit |
 
-The mouse works throughout: a click ticks a task, a click on a group header
-ticks the whole group, the bottom buttons mirror the keys, and the wheel
-scrolls the panel under the pointer (over the tab bar it switches tabs). The
-terminal has to pass mouse events through; inside tmux that means
-`set -g mouse on`, and terminals embedded in IDEs or chat tools often do not
-forward the mouse at all. When in doubt run `./uniscript --input-probe`: it
-prints every event the terminal actually delivers, so it shows in seconds
-whether the mouse ever reaches the application.
+The mouse works everywhere: clicks tick tasks and open groups, the wheel
+scrolls the panel under the pointer. The terminal has to forward mouse events
+(in tmux: `set -g mouse on`); `./uniscript --input-probe` prints what actually
+arrives. Task markers: green `✓` already applied, amber `●` changes system
+behaviour, red `▲` can break the system.
 
-Tasks are marked: a green `✓` (detected as already applied), an amber `●`
-(changes system behaviour), a red `▲` (can break the system or weaken its
-security).
-
-## Without the interface
-
-```sh
-./uniscript --system                       # what was detected
-./uniscript --list                         # the available tasks with their ids
-./uniscript --plan fedora-rpmfusion        # the commands that would go to the shell
-./uniscript --run fedora-rpmfusion --yes   # run without asking
-./uniscript --run fedora-copr --input fedora-copr=solopasha/telegram-desktop
-```
-
-`--dry-run` works together with `--run`.
+The browser GUI serves the same catalogue and the same engine on
+`127.0.0.1`, guarded by a one-off token, so only this machine can reach it.
+It adds a Quick setup tour: the post-install baseline for the detected
+hardware (repositories, the NVIDIA driver when the card is there, codecs, a
+full update, the safe tweaks) selected in one click, always behind the same
+plan-and-confirm step. Keep the terminal open: the administrator password is
+still asked there, never in the browser.
 
 ## Safety
 
-- **Passwords never go through the interface.** Authorisation happens once, on
-  the real terminal, with the TUI suspended. After that every command runs
-  through `sudo -n`. Privileges are only requested when the plan actually
-  contains a system task.
-- **Every file change is backed up first**, into
-  `~/.local/share/uniscript/backups/<session>/`, with a `manifest.json` and a
-  generated `restore.sh` that reverts the whole session, remembering ownership
-  and mode and not stopping at the first error.
-- **Dry run** shows every command and every file diff without running anything.
-- **Tasks are idempotent** as far as that can be detected. What is already done
-  is marked `done` and skipped by default.
-- **Nothing is downloaded on trust.** Repositories come from the official
-  sources of the distribution, and where the GPG key arrives later than the
-  package (Terra), the task description says so.
+- Passwords never pass through the interface: one prompt on the real terminal,
+  then `sudo -n`, and only when the plan actually contains a system task.
+- Every file change is first backed up to `~/.local/share/uniscript/backups/`,
+  with a generated `restore.sh` that reverts the whole session.
+- Dry run prints every command and every file diff without running anything.
+- Tasks detected as already applied are marked `done` and skipped; repositories
+  come only from official sources.
 
-## What is in the task catalogue
+## The catalogue
 
-80 tasks. Only the ones matching the detected system and hardware are shown. On
-the test machine (NVIDIA, KDE, Btrfs, desktop) that is 47 tasks on Fedora, 43 on
-Ubuntu, 42 on Arch and 37 on openSUSE.
+140 tasks; only those matching the machine are shown. On the test machine that
+is 104 on Fedora, 98 on Ubuntu, 97 on Arch and 92 on openSUSE; `--list` prints
+the exact set for yours. Shared across families: Flatpak and Flathub,
+applications one per task in groups (including Helium from the developers' own
+repo or AppImage), the gaming stack, kernel and IO tuning, zram, encrypted
+DNS, firewall, package and Flatpak maintenance, shells. Per family: RPM
+Fusion, COPR, Terra and the NVIDIA driver on Fedora; Firefox from Mozilla
+instead of the snap, universe/multiverse and drivers on Debian and Ubuntu; an
+AUR helper, multilib and pacman tuning on Arch; Packman codecs on openSUSE.
 
-| Where | Tasks | What they cover |
-| --- | --- | --- |
-| all families | 34 | Flatpak and Flathub, application sets (multimedia, office, system tools, messengers, browsers, terminals, music players), snapd, the gaming stack (Heroic, Bottles, ProtonUp-Qt, MangoHud, kernel limits), kernel and IO tuning, zram, journal cap, TRIM, encrypted DNS, firewall, power profiles, cache cleanup, zsh, fish, bash and starship |
-| Fedora, RHEL | 18 | RPM Fusion free, nonfree and tainted, openh264, COPR, Terra, faster dnf, codecs, the NVIDIA driver, AMD and Intel video decoding, Btrfs snapshots, fwupd, old kernels |
-| Debian, Ubuntu, Mint | 11 | universe and multiverse, Debian components, Microsoft codecs and fonts, Firefox from Mozilla instead of the snap, drivers, earlyoom, apt tuning |
-| Arch and derivatives | 11 | mirror list, an AUR helper (paru or yay), multilib, codecs, drivers, pacman tuning, a package cache cap |
-| openSUSE | 6 | Packman and the full codecs with `--allow-vendor-change`, drivers |
-
-Every family also has a full system upgrade, a gaming set and the clock in UTC
-for a dual boot; Fedora, Debian and openSUSE additionally get archive support.
-`./uniscript --list` prints the exact set for the machine you are on.
-
-Two details worth knowing. On Ubuntu the snap task removes every snap,
-uninstalls snapd and blocks its return, swapping Firefox for the Mozilla build
-so you are not left without a browser; elsewhere installing snapd is offered but
-marked risky. Shells are switched with `chsh` (`usermod` as a fallback) for the
-user who started uniscript, never for root.
-
-## What is deliberately missing
-
-- **Chaotic-AUR.** I could not verify the signing key of that repository. There
-  is a task installing an AUR helper instead.
-- Anything picking choices for the user. The `e` and `g` sets only select, the
-  plan always has to be confirmed.
-- Tasks that can be neither detected nor reverted.
+Worth knowing: the Ubuntu snap-removal task removes every snap and swaps
+Firefox for the Mozilla build, so you are not left without a browser. Shells
+are switched with `chsh` for the user who started uniscript, never for root.
+Deliberately missing: Chaotic-AUR (its signing key could not be verified),
+anything that picks choices for the user, and tasks that can be neither
+detected nor reverted.
 
 ## Structure
 
@@ -173,42 +114,30 @@ install.sh             the one-line installer
 uniscript              the launcher, creates the environment and runs the module
 src/uniscript/
   cli.py               the mode without an interface
-  core/                detection, probes, the task model, running, privileges,
-                       backups and restore.sh, the execution context
+  core/                detection, probes, the task model, runner, privileges,
+                       backups and restore.sh
   catalog/             the task catalogue, shared and per distribution family
   tui/                 the Textual interface
 ```
 
-The resource limits are explicit: the log keeps 2000 lines, process output is
-read in 8 KiB chunks with lines truncated at 4000 characters, the last 200 lines
-are kept for the error report, and every command has a timeout and is killed
-together with its whole process group.
+Resource limits are explicit: the log keeps 2000 lines, process output is read
+in 8 KiB chunks with lines capped at 4000 characters, and every command has a
+timeout and is killed together with its process group.
 
 ## Verification status
 
-- **Fedora 44 (dnf5, KDE, NVIDIA RTX 4060 Ti): checked on a live machine.**
-  Detection, dry run, the diff preview, writing a file with a backup, rewriting
-  the same content, a working `restore.sh`, running a system task and a user
-  task, and the whole shell section against a test HOME.
-- **The installer: run end to end** against a local `file://` clone, including
-  the four guards (target that is not a repository, target pointing elsewhere, a
-  run through `sudo`, a branch that does not exist).
-- **Debian, Ubuntu, Arch, openSUSE: written, not run.** The package names and
-  commands come from the documentation of each distribution, but no path there
-  has been executed.
-- Not confirmed on a live system: the `dnf group upgrade multimedia` syntax in
-  dnf5, and the starship init lines, because starship is not in the Fedora 44
-  repositories.
+- Fedora 44 (dnf5, KDE, NVIDIA): checked on a live machine, including dry run,
+  backups with a working `restore.sh`, system and user tasks and the shell
+  section.
+- The installer: run end to end against a local clone, including its guards.
+- Debian, Ubuntu, Arch, openSUSE: written, not run. The commands come from
+  each distribution's documentation.
+- Not confirmed live: the `dnf group upgrade multimedia` syntax under dnf5, the
+  starship init lines, the AppImage install paths (Helium, Unisic) with their
+  Gear Lever hand-off, and a live root run through the browser GUI since the
+  sudo-ticket fix; the GUI itself has run real tasks on Fedora.
 
 ## Development
 
-```sh
-ruff check src/
-ruff format src/
-```
-
-The configuration lives in `ruff.toml`, 100 character lines.
-
-## Licence
-
-MIT, the `LICENSE` file.
+`ruff check src/` and `ruff format src/`, configuration in `ruff.toml`.
+Licence: MIT, the `LICENSE` file.
