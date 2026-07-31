@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>uniscript</title>
+<style>
+  /* Tokyo Night, the same roles as the TUI palette. */
+  :root {
+    --bg: #16161e; --surface: #1a1b26; --panel: #24283b; --panel-2: #2f334d;
+    --hover: #3b4261; --fg: #c0caf5; --muted: #565f89; --border: #24283b;
+    --blue: #7aa2f7; --cyan: #7dcfff; --green: #9ece6a; --amber: #e0af68;
+    --red: #f7768e; --magenta: #bb9af7;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #e1e2e7; --surface: #e9e9ed; --panel: #d3d7e4; --panel-2: #c8cede;
+      --hover: #b9c1d6; --fg: #343b58; --muted: #848cb5; --border: #d3d7e4;
+      --blue: #2e7de9; --cyan: #007197; --green: #587539; --amber: #8c6c3e;
+      --red: #f52a65; --magenta: #9854f1;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 14px/1.5 system-ui, sans-serif;
+    display: grid; grid-template-rows: auto 1fr auto auto;
+    grid-template-columns: 220px minmax(320px, 3fr) minmax(280px, 2fr);
+    grid-template-areas: "top top top" "side list detail" "actions actions actions" "log log log";
+    gap: 8px; padding: 0 8px 8px; height: 100vh;
+  }
+  button { font: inherit; color: inherit; background: var(--panel-2); border: none;
+    border-radius: 6px; padding: 6px 14px; cursor: pointer; }
+  button:hover { background: var(--hover); }
+  button:focus-visible, input:focus-visible, .row:focus-visible {
+    outline: 2px solid var(--cyan); outline-offset: 1px; }
+  button:disabled { opacity: .45; cursor: default; }
+  input[type=text], input[type=search] {
+    background: var(--bg); color: var(--fg); border: 1px solid var(--panel-2);
+    border-radius: 6px; padding: 6px 10px; }
+
+  header { grid-area: top; display: flex; align-items: center; gap: 12px;
+    background: var(--panel); margin: 0 -8px; padding: 8px 16px; }
+  header .brand { font-weight: 700; }
+  header .brand::before { content: "▌"; color: var(--cyan); }
+  header input { flex: 1; max-width: 480px; }
+  header .sys { margin-left: auto; color: var(--muted); white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; }
+
+  .pane { background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; overflow: auto; }
+  nav { grid-area: side; padding: 6px; }
+  nav button { display: flex; width: 100%; text-align: left; background: none;
+    padding: 6px 10px; border-radius: 6px; gap: 6px; }
+  nav button .n { margin-left: auto; color: var(--cyan); }
+  nav button.active { background: var(--panel-2); }
+  nav button:hover { background: var(--hover); }
+
+  main { grid-area: list; padding: 6px; }
+  .group > .head { display: flex; align-items: center; gap: 8px; width: 100%;
+    background: none; font-weight: 600; padding: 6px 10px; }
+  .group > .head::before { content: "▸"; color: var(--cyan); }
+  .group.open > .head::before { content: "▾"; }
+  .group > .head .n { color: var(--muted); font-weight: 400; }
+  .group > .head .sel { color: var(--cyan); font-weight: 400; }
+  .group > .body { display: none; }
+  .group.open > .body { display: block; }
+  .row { display: flex; align-items: center; gap: 8px; padding: 5px 10px 5px 14px;
+    border-radius: 6px; cursor: pointer; }
+  .row:hover { background: var(--hover); }
+  .row.current { background: var(--panel-2); }
+  .row .mark { width: 1em; text-align: center; }
+  .row .mark.ok { color: var(--green); }
+  .row .mark.med { color: var(--amber); }
+  .row .mark.high { color: var(--red); }
+  .row.applied .title { color: var(--muted); }
+  .row input { accent-color: var(--blue); }
+
+  aside { grid-area: detail; padding: 14px 18px; }
+  aside h2 { margin: 0 0 8px; font-size: 16px; }
+  aside .badges { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  aside .badge { border-radius: 999px; padding: 1px 10px; font-size: 12px;
+    background: var(--panel-2); color: var(--muted); }
+  aside .badge.ok { color: var(--green); } aside .badge.med { color: var(--amber); }
+  aside .badge.high { color: var(--red); }
+  aside .warn { border-left: 3px solid var(--amber); padding: 4px 10px;
+    margin: 10px 0; color: var(--amber); background: var(--panel); border-radius: 0 6px 6px 0; }
+  aside ul { margin: 8px 0; padding-left: 18px; }
+  aside pre { background: var(--bg); border: 1px solid var(--panel-2);
+    border-radius: 6px; padding: 8px 10px; overflow-x: auto; font-size: 12.5px; }
+  aside pre span { color: var(--muted); }
+
+  .actions { grid-area: actions; display: flex; align-items: center; gap: 8px; }
+  .actions .lbl { color: var(--muted); margin-left: 8px; }
+  .actions .quick { background: var(--magenta); color: var(--bg); font-weight: 600; }
+  .actions .run { background: var(--green); color: var(--bg); font-weight: 700; }
+  .actions .count { margin-left: auto; color: var(--muted); }
+  .actions .dry.off { color: var(--amber); font-weight: 600; }
+
+  #logwrap { grid-area: log; display: none; max-height: 200px; }
+  #logwrap.show { display: block; }
+  #logwrap .bar { display: flex; gap: 12px; align-items: center;
+    padding: 4px 12px; background: var(--panel); border-radius: 8px 8px 0 0; }
+  #log { margin: 0; padding: 8px 12px; overflow: auto; max-height: 160px;
+    font: 12.5px/1.45 ui-monospace, monospace; background: var(--surface);
+    border-radius: 0 0 8px 8px; }
+  #log .cmd { color: var(--cyan); } #log .dry { color: var(--magenta); }
+  #log .warn { color: var(--amber); } #log .error { color: var(--red); }
+  #log .ok { color: var(--green); } #log .task { font-weight: 700; }
+  #log .skip, #log .out { color: var(--muted); } #log .note { color: var(--green); }
+
+  dialog { background: var(--surface); color: var(--fg); border: 1px solid var(--panel-2);
+    border-radius: 10px; max-width: 720px; width: 90vw; max-height: 85vh; padding: 0; }
+  dialog::backdrop { background: rgb(0 0 0 / .55); }
+  dialog .dhead { padding: 14px 20px 0; font-size: 16px; font-weight: 700; }
+  dialog .dbody { padding: 10px 20px; overflow: auto; max-height: 60vh; }
+  dialog .dfoot { display: flex; justify-content: flex-end; gap: 10px;
+    padding: 12px 20px 16px; }
+  dialog h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em;
+    color: var(--cyan); margin: 14px 0 4px; }
+  dialog .qrow { display: flex; gap: 8px; padding: 3px 0; align-items: baseline; }
+  dialog .qrow .why { color: var(--muted); }
+  dialog .qrow.applied { color: var(--muted); }
+  dialog pre { background: var(--bg); border-radius: 6px; padding: 6px 10px;
+    font-size: 12px; overflow-x: auto; }
+  dialog .fail { color: var(--red); } dialog .good { color: var(--green); }
+  dialog label { display: block; margin: 8px 0 2px; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">uniscript</span>
+  <input type="search" id="search" placeholder="search the tasks">
+  <span class="sys" id="sys"></span>
+</header>
+<nav class="pane" id="nav"></nav>
+<main class="pane" id="list"></main>
+<aside class="pane" id="detail"><p style="color:var(--muted)">Pick a task to see what it does.</p></aside>
+<div class="actions">
+  <button class="quick" id="btn-quick"
+    title="A guided post-install baseline for this machine: repositories, drivers, codecs, update and the safe tweaks.">Quick setup</button>
+  <button class="run" id="btn-run" disabled
+    title="Show the full plan of commands, then run the selected tasks.">Run 0</button>
+  <button class="dry" id="btn-dry"
+    title="With dry run on, nothing is changed: every command and file diff is only printed.">Dry run: on</button>
+  <span class="lbl">Select:</span>
+  <button id="btn-ess"
+    title="Select every recommended task that is not done yet: repositories, codecs, the safe tweaks.">Recommended</button>
+  <button id="btn-gaming"
+    title="Select the recommended set plus the gaming stack: Heroic, Bottles, Proton managers, MangoHud.">Gaming set</button>
+  <button id="btn-none" title="Clear the selection.">None</button>
+  <span class="count" id="count"></span>
+</div>
+<div id="logwrap">
+  <div class="bar">
+    <strong id="run-state"></strong>
+    <span id="run-progress" style="color:var(--muted)"></span>
+    <button id="btn-abort" style="margin-left:auto">Abort</button>
+    <button id="btn-log-hide" style="margin-left:auto" hidden
+      title="Hide this panel; it comes back with the next run.">Hide</button>
+  </div>
+  <pre id="log"></pre>
+</div>
+<dialog id="dlg-quick"></dialog>
+<dialog id="dlg-plan"></dialog>
+<dialog id="dlg-summary"></dialog>
+
+<script>
+"use strict";
+const token = new URLSearchParams(location.search).get("token");
+const api = (path) => path + (path.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(token);
+const $ = (id) => document.getElementById(id);
+const esc = (text) => String(text ?? "").replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+let state = null;
+let selected = new Set();
+let activeCategory = null;
+let currentTask = null;
+let dryRun = true;
+let logIndex = 0;
+let polling = null;
+let detectTimer = null;
+
+const RISK = { SAFE: ["", "safe", "ok"], MEDIUM: ["●", "needs care", "med"], HIGH: ["▲", "risky", "high"] };
+
+async function load() {
+  const first = state === null;
+  const response = await fetch(api("/api/state"));
+  state = await response.json();
+  if (first) dryRun = state.dry_run;
+  if (activeCategory === null) activeCategory = state.categories[0]?.name ?? null;
+  $("sys").textContent = state.system.pretty_name + "  |  " + state.system.package_manager;
+  render();
+  // The applied-state probe reads the whole package list and finishes a few
+  // seconds after start; keep refetching until the checkmarks are real.
+  clearTimeout(detectTimer);
+  if (state.detecting) detectTimer = setTimeout(load, 1200);
+}
+
+const tasksOf = (name) => state.tasks.filter((t) => t.category === name);
+const matches = (t, q) => !q || (t.title + " " + t.summary + " " + t.id + " " + (t.subcategory || ""))
+  .toLowerCase().includes(q.toLowerCase());
+
+function render() {
+  renderNav(); renderList(); renderActions();
+  if (currentTask) renderDetail(state.tasks.find((t) => t.id === currentTask));
+}
+
+function renderNav() {
+  $("nav").innerHTML = state.categories.map((c) => {
+    const n = tasksOf(c.name).filter((t) => selected.has(t.id)).length;
+    return `<button data-cat="${c.name}" class="${c.name === activeCategory ? "active" : ""}">
+      ${esc(c.label)}${n ? `<span class="n">${n}</span>` : ""}</button>`;
+  }).join("");
+  for (const btn of $("nav").querySelectorAll("button"))
+    btn.onclick = () => { activeCategory = btn.dataset.cat; $("search").value = ""; render(); };
+}
+
+function taskRow(t) {
+  const applied = t.applied === true;
+  const [glyph, , cls] = RISK[t.risk] ?? RISK.SAFE;
+  const mark = applied ? `<span class="mark ok">✓</span>`
+    : glyph ? `<span class="mark ${cls}">${glyph}</span>` : `<span class="mark"></span>`;
+  return `<div class="row ${applied ? "applied" : ""} ${t.id === currentTask ? "current" : ""}"
+      data-id="${t.id}" tabindex="0">
+    <input type="checkbox" ${selected.has(t.id) ? "checked" : ""} aria-label="select ${esc(t.title)}">
+    ${mark}<span class="title">${esc(t.title)}</span></div>`;
+}
+
+function renderList() {
+  const query = $("search").value.trim();
+  const pool = query ? state.tasks.filter((t) => matches(t, query)) : tasksOf(activeCategory);
+  const groups = new Map();
+  const loose = [];
+  for (const t of pool) (t.subcategory ? (groups.get(t.subcategory) ?? groups.set(t.subcategory, []).get(t.subcategory)) : loose).push(t);
+  let html = "";
+  for (const [name, tasks] of groups) {
+    const chosen = tasks.filter((t) => selected.has(t.id)).length;
+    html += `<div class="group ${query || openGroups.has(name) ? "open" : ""}" data-group="${esc(name)}">
+      <button class="head">${esc(name)} <span class="n">${tasks.length}</span>
+        ${chosen ? `<span class="sel">${chosen} ✓</span>` : ""}</button>
+      <div class="body">${tasks.map(taskRow).join("")}</div></div>`;
+  }
+  html += loose.map(taskRow).join("");
+  $("list").innerHTML = html || `<p style="color:var(--muted);padding:10px">Nothing matches.</p>`;
+  for (const head of $("list").querySelectorAll(".group > .head"))
+    head.onclick = () => {
+      const name = head.parentElement.dataset.group;
+      openGroups.has(name) ? openGroups.delete(name) : openGroups.add(name);
+      head.parentElement.classList.toggle("open");
+    };
+  for (const row of $("list").querySelectorAll(".row")) {
+    const id = row.dataset.id;
+    row.querySelector("input").onclick = (event) => { event.stopPropagation(); toggle(id); };
+    row.onclick = () => { currentTask = id; renderDetail(state.tasks.find((t) => t.id === id));
+      $("list").querySelector(".row.current")?.classList.remove("current"); row.classList.add("current"); };
+    row.onkeydown = (event) => { if (event.key === " ") { event.preventDefault(); toggle(id); } };
+  }
+}
+const openGroups = new Set();
+
+function toggle(id) {
+  selected.has(id) ? selected.delete(id) : selected.add(id);
+  render();
+}
+
+function renderDetail(t) {
+  if (!t) return;
+  const [glyph, label, cls] = RISK[t.risk] ?? RISK.SAFE;
+  const badges = [`<span class="badge ${cls}">${glyph ? glyph + " " : ""}${label}</span>`];
+  if (t.applied === true) badges.push(`<span class="badge ok">✓ already applied</span>`);
+  if (t.reboot) badges.push(`<span class="badge med">needs a reboot</span>`);
+  if (t.default) badges.push(`<span class="badge">essentials</span>`);
+  if (t.gaming) badges.push(`<span class="badge">gaming</span>`);
+  $("detail").innerHTML = `<h2>${esc(t.title)}</h2>
+    <div class="badges">${badges.join("")}</div>
+    <p>${esc(t.summary)}</p>
+    ${t.warning ? `<div class="warn">▲ ${esc(t.warning)}</div>` : ""}
+    ${t.details.length ? `<ul>${t.details.map((d) => `<li>${esc(d)}</li>`).join("")}</ul>` : ""}
+    ${t.preview.length ? `<h3 style="font-size:13px">What will be done</h3>
+      <pre>${t.preview.map((c) => `<span>›</span> ${esc(c)}`).join("\n")}</pre>` : ""}`;
+}
+
+function renderActions() {
+  $("btn-run").textContent = `Run ${selected.size}`;
+  $("btn-run").disabled = selected.size === 0;
+  $("btn-dry").textContent = `Dry run: ${dryRun ? "on" : "OFF"}`;
+  $("btn-dry").classList.toggle("off", !dryRun);
+  const pendingDefaults = state.tasks.filter((t) => t.default && t.applied !== true).length;
+  const pendingGaming = state.tasks.filter((t) => (t.default || t.gaming) && t.applied !== true).length;
+  $("btn-ess").textContent = `Recommended (${pendingDefaults})`;
+  $("btn-gaming").textContent = `Gaming set (${pendingGaming})`;
+  const done = state.tasks.filter((t) => t.applied === true).length;
+  $("count").textContent = state.detecting
+    ? "checking what is already done..."
+    : `${state.tasks.length} tasks, ${done} already done`;
+}
+
+/* ---------------------------------------------------------- quick setup */
+
+function quickTour() {
+  const ids = state.quick.filter((id) => state.tasks.find((t) => t.id === id));
+  const byCategory = new Map();
+  for (const id of ids) {
+    const t = state.tasks.find((task) => task.id === id);
+    const label = state.categories.find((c) => c.name === t.category)?.label ?? t.category;
+    (byCategory.get(label) ?? byCategory.set(label, []).get(label)).push(t);
+  }
+  const pending = ids.filter((id) => state.tasks.find((t) => t.id === id)?.applied !== true);
+  let html = `<div class="dhead">Quick setup</div><div class="dbody">
+    <p>The post-install baseline for this machine: repositories, drivers detected
+    for your hardware, codecs, a full update and the safe tweaks. Already done
+    tasks stay untouched. Nothing runs before you see the full plan.</p>`;
+  for (const [label, tasks] of byCategory) {
+    html += `<h3>${esc(label)}</h3>` + tasks.map((t) => {
+      const applied = t.applied === true;
+      return `<div class="qrow ${applied ? "applied" : ""}">
+        <span>${applied ? "✓" : "•"}</span><span>${esc(t.title)}</span>
+        <span class="why">${applied ? "already done" : esc(t.summary)}</span></div>`;
+    }).join("");
+  }
+  html += `</div><div class="dfoot">
+    <button id="q-close">Close</button>
+    <button class="run" id="q-select">Select ${pending.length} tasks</button></div>`;
+  $("dlg-quick").innerHTML = html;
+  $("dlg-quick").showModal();
+  $("q-close").onclick = () => $("dlg-quick").close();
+  $("q-select").onclick = () => {
+    selected = new Set(pending);
+    $("dlg-quick").close();
+    render();
+    openPlan();
+  };
+}
+
+/* ------------------------------------------------------------------ run */
+
+function openPlan() {
+  const tasks = state.tasks.filter((t) => selected.has(t.id));
+  if (!tasks.length) return;
+  const warnings = tasks.filter((t) => t.warning);
+  const prompts = tasks.filter((t) => t.prompt);
+  let html = `<div class="dhead">Plan: ${tasks.length} tasks</div><div class="dbody">
+    <p class="${dryRun ? "" : "fail"}">${dryRun
+      ? "Dry run: nothing will be changed."
+      : "LIVE: the system will be changed."}</p>`;
+  if (warnings.length)
+    html += `<h3>Warnings</h3>` + warnings.map((t) =>
+      `<div class="qrow"><span class="fail">▲</span><span>${esc(t.title)}</span>
+       <span class="why">${esc(t.warning)}</span></div>`).join("");
+  for (const t of tasks)
+    html += `<h3>${esc(t.title)}</h3><pre>${t.preview.map(esc).join("\n")}</pre>` +
+      (t.prompt ? `<label for="in-${t.id}">${esc(t.prompt.label)}</label>
+        <input type="text" id="in-${t.id}" value="${esc(t.prompt.default)}"
+          placeholder="${esc(t.prompt.placeholder)}">` : "");
+  html += `</div><div class="dfoot">
+    <button id="p-cancel">Cancel</button>
+    <button class="run" id="p-run">${dryRun ? "Dry run" : "Run"}</button></div>`;
+  $("dlg-plan").innerHTML = html;
+  $("dlg-plan").showModal();
+  $("p-cancel").onclick = () => $("dlg-plan").close();
+  $("p-run").onclick = async () => {
+    const inputs = {};
+    for (const t of prompts) inputs[t.id] = $("in-" + t.id).value;
+    const response = await fetch(api("/api/run"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: [...selected], dry_run: dryRun, inputs }),
+    });
+    const result = await response.json();
+    if (result.error) { alert(result.error); return; }
+    $("dlg-plan").close();
+    startPolling();
+  };
+}
+
+function startPolling() {
+  $("logwrap").classList.add("show");
+  $("btn-abort").hidden = false;
+  $("btn-log-hide").hidden = true;
+  $("btn-run").disabled = true;
+  polling = setInterval(poll, 400);
+}
+
+async function poll() {
+  const response = await fetch(api(`/api/log?since=${logIndex}`));
+  const data = await response.json();
+  if (data.lines.length) {
+    $("log").insertAdjacentHTML("beforeend", data.lines.map((line) =>
+      `<div class="${esc(line.level)}">${esc(line.text)}</div>`).join(""));
+    $("log").scrollTop = $("log").scrollHeight;
+    logIndex = data.next;
+  }
+  const status = data.status;
+  if (status.phase === "running" || status.phase === "priming") {
+    $("run-state").textContent = status.phase === "priming"
+      ? "waiting for the password in the terminal" : (status.dry_run ? "dry run" : "running");
+    $("run-progress").textContent = status.total
+      ? `${status.index}/${status.total}  ${status.current ?? ""}` : "";
+  } else if (status.phase === "done") {
+    clearInterval(polling);
+    $("run-state").textContent = "finished";
+    $("run-progress").textContent = "";
+    $("btn-abort").hidden = true;
+    $("btn-log-hide").hidden = false;
+    for (const title of status.done) {
+      const task = state.tasks.find((t) => t.title === title);
+      if (task) selected.delete(task.id);
+    }
+    await load();
+    summary(status);
+  }
+}
+
+function summary(status) {
+  let html = `<div class="dhead">Summary</div><div class="dbody">`;
+  if (status.dry_run) html += `<p>Dry run: nothing was written.</p>`;
+  if (status.failed.length) html += `<h3 class="fail">Failed (${status.failed.length})</h3>` +
+    status.failed.map((f) => `<div class="qrow"><span class="fail">✗</span>
+      <span>${esc(f.title)}</span><span class="why">${esc(f.error)}</span></div>`).join("");
+  if (status.done.length) html += `<h3 class="good">Applied (${status.done.length})</h3>` +
+    status.done.map((t) => `<div class="qrow"><span class="good">✓</span><span>${esc(t)}</span></div>`).join("");
+  if (status.skipped.length) html += `<h3>Skipped (${status.skipped.length})</h3>` +
+    status.skipped.map((t) => `<div class="qrow"><span>·</span><span>${esc(t)}</span></div>`).join("");
+  if (status.notes.length) html += `<h3>Still to do</h3>` +
+    status.notes.map((n) => `<div class="qrow"><span>-</span><span>${esc(n)}</span></div>`).join("");
+  html += `<p style="color:var(--muted)">Backups: ${esc(status.backups)}</p>`;
+  if (status.reboot) html += `<p class="fail">A reboot is required.</p>`;
+  html += `</div><div class="dfoot"><button id="s-close">Close</button></div>`;
+  $("dlg-summary").innerHTML = html;
+  $("dlg-summary").showModal();
+  $("s-close").onclick = () => $("dlg-summary").close();
+}
+
+/* --------------------------------------------------------------- wiring */
+
+$("search").oninput = () => renderList();
+$("btn-quick").onclick = quickTour;
+$("btn-run").onclick = openPlan;
+$("btn-dry").onclick = () => { dryRun = !dryRun; renderActions(); };
+$("btn-ess").onclick = () => {
+  selected = new Set(state.tasks.filter((t) => t.default && t.applied !== true).map((t) => t.id));
+  render();
+};
+$("btn-gaming").onclick = () => {
+  selected = new Set(state.tasks.filter((t) => (t.default || t.gaming) && t.applied !== true).map((t) => t.id));
+  render();
+};
+$("btn-none").onclick = () => { selected = new Set(); render(); };
+$("btn-abort").onclick = () => fetch(api("/api/abort"), { method: "POST" });
+$("btn-log-hide").onclick = () => $("logwrap").classList.remove("show");
+document.addEventListener("keydown", (event) => {
+  if (event.key === "/" && document.activeElement !== $("search")) {
+    event.preventDefault(); $("search").focus();
+  }
+});
+
+load();
+</script>
+</body>
+</html>

@@ -71,6 +71,16 @@ def _parser() -> argparse.ArgumentParser:
         help="skip the confirmation prompt for --run",
     )
     parser.add_argument(
+        "--tui",
+        action="store_true",
+        help="start the terminal interface without asking",
+    )
+    parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="start the browser GUI without asking",
+    )
+    parser.add_argument(
         "--input-probe",
         action="store_true",
         help="show the raw key and mouse events this terminal delivers, then exit",
@@ -141,6 +151,29 @@ def _input_probe() -> int:
     else:
         print("The mouse reaches the application, so uniscript will see it too.")
     return 0
+
+
+def _ask_interface() -> str:
+    """One question before anything starts: the terminal or the browser."""
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        return "tui"
+    print("How do you want to run uniscript?")
+    print("  1) Terminal interface (TUI)")
+    print("  2) Browser GUI")
+    while True:
+        try:
+            answer = input("Choice [1]: ").strip().lower()
+        except EOFError:
+            print()
+            return "tui"
+        except KeyboardInterrupt:
+            print()
+            raise SystemExit(130) from None
+        if answer in ("", "1", "t", "tui"):
+            return "tui"
+        if answer in ("2", "g", "gui", "w", "web"):
+            return "gui"
+        print("1 or 2, please.")
 
 
 def _select(tasks: list[Task], spec: str) -> tuple[list[Task], list[str]]:
@@ -337,6 +370,18 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
         privileges = PrivilegeManager(system)
         return asyncio.run(_run_headless(system, probe, privileges, chosen, inputs, args.dry_run))
+
+    interface = "gui" if args.gui else "tui" if args.tui else _ask_interface()
+    if interface == "gui":
+        from .gui.server import serve
+
+        return serve(
+            port=0,
+            open_browser=True,
+            dry_run=args.dry_run,
+            backup_root=data_dir() / "backups",
+            system=system,
+        )
 
     from .tui.app import run_app
 
