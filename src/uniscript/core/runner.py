@@ -61,7 +61,11 @@ async def stream_command(
         stderr=asyncio.subprocess.STDOUT,
         cwd=cwd,
         env=full_env,
-        start_new_session=True,
+        # A new process group so a timeout can kill the whole tree, but NOT a
+        # new session: setsid would drop the controlling terminal, and sudo's
+        # default tty_tickets binds the primed timestamp to that terminal, so
+        # every `sudo -n` in a new session dies with "a password is required".
+        process_group=0,
     )
 
     tail: deque[str] = deque(maxlen=TAIL_LINES)

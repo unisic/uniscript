@@ -84,6 +84,23 @@ class ExecContext:
             raise CommandFailed(full, 127, [f"command not found: {full[0]}"]) from None
 
         if result.returncode != 0:
+            if (
+                root
+                and self.privileges.backend in {"sudo", "doas"}
+                and any("password is required" in line for line in result.tail)
+            ):
+                # Every root command would now fail the same way; one loud
+                # failure beats a cascade of "failure allowed" lines that
+                # ends in a false "done".
+                raise CommandFailed(
+                    full,
+                    result.returncode,
+                    [
+                        *result.tail,
+                        "sudo could not run without a password: the ticket expired "
+                        "or belongs to another terminal",
+                    ],
+                )
             if allow_fail:
                 self.log(f"exit code {result.returncode}, continuing (failure allowed)", "warn")
                 return result.returncode
