@@ -6,7 +6,7 @@ that fit the machine: repositories, drivers, codecs, applications, gaming,
 shell switching, conservative tweaks and maintenance. Nothing happens on its
 own: you pick the tasks, read the exact commands, then confirm.
 
-**Version 0.2.0, read this first.** It installs packages, adds repositories and
+**Version 0.3.0, read this first.** It installs packages, adds repositories and
 edits files under `/etc`, so treat it accordingly: start with `--dry-run`, have
 a snapshot or another way back, and keep it off machines you cannot reinstall.
 Only Fedora has been run on a live machine; Debian, Ubuntu, Arch and openSUSE
@@ -43,6 +43,8 @@ From a clone:
 ./uniscript --list                       # the available tasks and their ids
 ./uniscript --plan fedora-rpmfusion      # the commands a task would run
 ./uniscript --run fedora-rpmfusion --yes # headless; --dry-run and --input work here too
+./uniscript --remove apps-vlc            # uninstall an application, headless
+./uniscript --restore                    # list the backup sessions; --restore SESSION reverts one
 ```
 
 ## The interface
@@ -60,10 +62,15 @@ switches between the dark and the day variant.
 | space, `a`, `n` | select a task, the whole group, nothing |
 | `/` | search everywhere, `esc` clears it |
 | `f` | switch an application between Flatpak and the system package |
+| `u` | mark an installed application to be uninstalled |
+| `b` | restore configuration files from a backup session |
 | `e`, `g` | the essentials or the gaming preset |
 | `r`, `d` | show the plan and run; toggle dry run |
 | shift+arrows | scroll the description |
 | `s`, `l`, `c`, `?`, `q` | system details, log, clear log, help, quit |
+
+The first start shows a three-step introduction; `?` brings the full help
+back any time.
 
 The mouse works everywhere: clicks tick tasks and open groups, the wheel
 scrolls the panel under the pointer. The terminal has to forward mouse events
@@ -85,6 +92,9 @@ still asked there, never in the browser.
   then `sudo -n`, and only when the plan actually contains a system task.
 - Every file change is first backed up to `~/.local/share/uniscript/backups/`,
   with a generated `restore.sh` that reverts the whole session.
+- The way back is built in: `b` in the TUI, the Restore button in the GUI or
+  `--restore` put the files of any past session back; installed applications
+  are uninstalled with `u`, the Uninstall button or `--remove`.
 - Dry run prints every command and every file diff without running anything.
 - Tasks detected as already applied are marked `done` and skipped; repositories
   come only from official sources.
@@ -97,7 +107,9 @@ machine that is 104 on Fedora, 101 on Ubuntu, 100 on Arch and 95 on openSUSE;
 Flathub, applications one per task in groups (including Helium from the
 developers' own repo or AppImage; where an app also lives in the system
 repositories, each install can be switched between Flatpak and the native
-package), the gaming stack, kernel and IO tuning,
+package, and a package that needs an extra repository says so: the native
+HandBrake on Fedora requires RPM Fusion and the requirement is checked
+before installing), the gaming stack, kernel and IO tuning,
 zram, encrypted DNS, firewall, package and Flatpak maintenance, shells. Per
 family: RPM Fusion, Terra, the NVIDIA driver and COPR with search and installs
 on Fedora; PPAs with installs, Firefox from Mozilla instead of the snap,
@@ -141,6 +153,9 @@ timeout and is killed together with its process group.
   starship init lines, the AppImage install paths (Helium, Unisic) with their
   Gear Lever hand-off, and a live root run through the browser GUI since the
   sudo-ticket fix; the GUI itself has run real tasks on Fedora.
+- Restore: `restore.sh` and its listing were exercised end to end on user-owned
+  files, including through the GUI; a restore of root-owned files has not been
+  run live. Uninstalls were exercised in dry run against the real system state.
 
 ## Development
 
