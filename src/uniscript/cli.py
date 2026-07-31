@@ -184,11 +184,17 @@ def _print_system(system: System, probe: Probe, tasks: list[Task]) -> None:
 
 def _print_list(system: System, probe: Probe, tasks: list[Task]) -> None:
     current = None
+    current_sub: str | None = None
     for task in tasks:
         if task.category is not current:
             current = task.category
+            current_sub = None
             print()
             print(f"== {current.label}")
+        if task.subcategory != current_sub:
+            current_sub = task.subcategory
+            if current_sub is not None:
+                print(f"   -- {current_sub}")
         applied = task.is_applied(probe, system)
         state = "done" if applied else "    "
         flags = []

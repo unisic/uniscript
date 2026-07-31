@@ -16,6 +16,7 @@ from ..core.tasks import (
     Note,
     Risk,
     Run,
+    Shell,
     Step,
     Task,
     Unit,
@@ -34,6 +35,11 @@ RESOLVED_PATH = "/etc/systemd/resolved.conf.d/99-uniscript-dns.conf"
 NOSNAP_PATH = "/etc/apt/preferences.d/99-uniscript-nosnap.pref"
 MANGOHUD_PATH = "~/.config/MangoHud/MangoHud.conf"
 SHELLS_PATH = "/etc/shells"
+
+HELIUM_KEY = "/etc/apt/keyrings/helium.asc"
+HELIUM_LIST = "/etc/apt/sources.list.d/helium.list"
+HELIUM_KEY_URL = "https://raw.githubusercontent.com/imputnet/helium-linux/main/pubkey.asc"
+HELIUM_APPIMAGE = ".local/bin/helium.AppImage"
 
 STARSHIP_MARKER = "# uniscript: starship prompt"
 
@@ -815,6 +821,23 @@ def _gaming_tasks(system: System) -> list[Task]:
             detect=lambda probe, sys_: probe.has_flatpak_app("net.davidotek.pupgui2"),
         ),
         Task(
+            id="gaming-protonplus",
+            title="ProtonPlus for managing Proton GE",
+            summary=(
+                "A GTK manager for Proton and Wine builds, for Steam, Lutris, Heroic "
+                "and Bottles."
+            ),
+            category=Category.GAMING,
+            risk=Risk.SAFE,
+            tags=frozenset({"gaming"}),
+            details=[
+                "Does the same job as ProtonUp-Qt; one of the two is enough.",
+                "Downloads and updates Proton GE, Wine GE and other compatibility tools.",
+            ],
+            steps=[_flatpak_install(["com.vysp3r.ProtonPlus"])],
+            detect=lambda probe, sys_: probe.has_flatpak_app("com.vysp3r.ProtonPlus"),
+        ),
+        Task(
             id="gaming-heroic",
             title="Heroic Games Launcher",
             summary="A client for the Epic Games Store, GOG and Amazon Games.",
@@ -1039,97 +1062,837 @@ def _shell_tasks(system: System) -> list[Task]:
 
 
 def _app_tasks(system: System) -> list[Task]:
-    groups: list[tuple[str, str, str, list[str], list[str]]] = [
+    # Each application is its own task inside a subcategory, so the interface
+    # can browse Applications the way linutil browses applications-setup:
+    # a directory per group, one entry per program.
+    groups: list[tuple[str, list[tuple[str, str, str, str, list[str]]]]] = [
         (
-            "apps-media",
-            "Multimedia",
-            "VLC, OBS Studio and Audacity as Flatpaks.",
-            ["org.videolan.VLC", "com.obsproject.Studio", "org.audacityteam.Audacity"],
-            [
-                "VLC plays practically any format without adding system codecs.",
-                "OBS Studio records and streams, with VAAPI and NVENC support.",
-            ],
-        ),
-        (
-            "apps-office",
-            "Office and documents",
-            "LibreOffice and an ebook reader.",
-            ["org.libreoffice.LibreOffice", "com.github.johnfactotum.Foliate"],
-            [
-                "Foliate reads EPUB and MOBI.",
-                "The Flatpak LibreOffice is usually newer than the one in the repository.",
-            ],
-        ),
-        (
-            "apps-system",
-            "System tools",
-            "Mission Center, a system monitor.",
-            ["io.missioncenter.MissionCenter"],
-            ["Mission Center shows CPU, GPU, disk and network load in one window."],
-        ),
-        (
-            "apps-comms",
-            "Messengers",
-            "Discord, Signal and Telegram.",
-            ["com.discordapp.Discord", "org.signal.Signal", "org.telegram.desktop"],
-            ["All as Flatpaks, updated independently of the system."],
-        ),
-        (
-            "apps-browsers",
             "Browsers",
-            "Brave, Chromium and LibreWolf.",
             [
-                "com.brave.Browser",
-                "org.chromium.Chromium",
-                "io.gitlab.librewolf-community",
-            ],
-            [
-                "Brave is Chromium with an ad blocker built in.",
-                "Chromium is the plain upstream browser without Google's additions.",
-                "LibreWolf is Firefox with the telemetry stripped out.",
+                (
+                    "apps-brave",
+                    "Brave",
+                    "com.brave.Browser",
+                    "Chromium with an ad blocker built in.",
+                    [],
+                ),
+                (
+                    "apps-chromium",
+                    "Chromium",
+                    "org.chromium.Chromium",
+                    "The plain upstream browser without Google's additions.",
+                    [],
+                ),
+                (
+                    "apps-librewolf",
+                    "LibreWolf",
+                    "io.gitlab.librewolf-community",
+                    "Firefox with the telemetry stripped out.",
+                    [],
+                ),
+                (
+                    "apps-firefox",
+                    "Firefox",
+                    "org.mozilla.firefox",
+                    "The standard Mozilla browser, packaged by Mozilla itself.",
+                    [],
+                ),
+                (
+                    "apps-vivaldi",
+                    "Vivaldi",
+                    "com.vivaldi.Vivaldi",
+                    "A power user browser: tab tiling, notes and mail built in.",
+                    [],
+                ),
+                (
+                    "apps-zen",
+                    "Zen Browser",
+                    "app.zen_browser.zen",
+                    "A Firefox fork with a compact, sidebar driven interface.",
+                    [],
+                ),
             ],
         ),
         (
-            "apps-music",
+            "Development",
+            [
+                (
+                    "apps-vscode",
+                    "Visual Studio Code",
+                    "com.visualstudio.code",
+                    "The original Microsoft build, with the full extension marketplace.",
+                    [
+                        "Includes Microsoft telemetry; VSCodium below is the same editor "
+                        "without it.",
+                        "The Flatpak sandbox can hide system toolchains; the SDK extensions "
+                        "or a flatpak override may be needed for some languages.",
+                    ],
+                ),
+                (
+                    "apps-vscodium",
+                    "VSCodium",
+                    "com.vscodium.codium",
+                    "VS Code built from source, without Microsoft branding and telemetry.",
+                    ["Extensions come from open-vsx.org instead of the Microsoft marketplace."],
+                ),
+                (
+                    "apps-intellij",
+                    "IntelliJ IDEA Community",
+                    "com.jetbrains.IntelliJ-IDEA-Community",
+                    "The free JetBrains IDE for Java, Kotlin and Groovy.",
+                    [],
+                ),
+                (
+                    "apps-meld",
+                    "Meld",
+                    "org.gnome.meld",
+                    "Visual diff and merge for files, directories and git.",
+                    [],
+                ),
+                (
+                    "apps-zed",
+                    "Zed",
+                    "dev.zed.Zed",
+                    "A GPU accelerated code editor with collaboration built in.",
+                    ["From the creators of Atom; language servers download on first use."],
+                ),
+                (
+                    "apps-podman-desktop",
+                    "Podman Desktop",
+                    "io.podman_desktop.PodmanDesktop",
+                    "A graphical manager for Podman and Docker containers.",
+                    [],
+                ),
+                (
+                    "apps-dbeaver",
+                    "DBeaver Community",
+                    "io.dbeaver.DBeaverCommunity",
+                    "A database client for PostgreSQL, MySQL, SQLite and most others.",
+                    [],
+                ),
+                (
+                    "apps-bruno",
+                    "Bruno",
+                    "com.usebruno.Bruno",
+                    "An API client in the Postman mould, with collections kept as files.",
+                    [],
+                ),
+                (
+                    "apps-godot",
+                    "Godot",
+                    "org.godotengine.Godot",
+                    "An open source 2D and 3D game engine.",
+                    [],
+                ),
+            ],
+        ),
+        (
+            "Graphics and 3D",
+            [
+                (
+                    "apps-gimp",
+                    "GIMP",
+                    "org.gimp.GIMP",
+                    "Raster image editing, the free counterpart of Photoshop.",
+                    [],
+                ),
+                (
+                    "apps-inkscape",
+                    "Inkscape",
+                    "org.inkscape.Inkscape",
+                    "Vector graphics and SVG editing.",
+                    [],
+                ),
+                (
+                    "apps-krita",
+                    "Krita",
+                    "org.kde.krita",
+                    "Digital painting with brush engines built for artists.",
+                    [],
+                ),
+                (
+                    "apps-blender",
+                    "Blender",
+                    "org.blender.Blender",
+                    "3D modelling, animation, sculpting and rendering.",
+                    [],
+                ),
+                (
+                    "apps-darktable",
+                    "darktable",
+                    "org.darktable.Darktable",
+                    "RAW photo development and cataloguing, the Lightroom counterpart.",
+                    [],
+                ),
+            ],
+        ),
+        (
+            "Messengers",
+            [
+                (
+                    "apps-discord",
+                    "Discord",
+                    "com.discordapp.Discord",
+                    "Voice, video and text chat.",
+                    ["Updated independently of the system."],
+                ),
+                (
+                    "apps-signal",
+                    "Signal",
+                    "org.signal.Signal",
+                    "End to end encrypted messenger, linked to the phone app.",
+                    [],
+                ),
+                (
+                    "apps-telegram",
+                    "Telegram",
+                    "org.telegram.desktop",
+                    "The official Telegram desktop client.",
+                    [],
+                ),
+                (
+                    "apps-element",
+                    "Element",
+                    "im.riot.Riot",
+                    "A Matrix client: federated, end to end encrypted rooms.",
+                    [],
+                ),
+                (
+                    "apps-slack",
+                    "Slack",
+                    "com.slack.Slack",
+                    "The official Slack client.",
+                    [],
+                ),
+                (
+                    "apps-zoom",
+                    "Zoom",
+                    "us.zoom.Zoom",
+                    "The official Zoom meetings client.",
+                    [],
+                ),
+                (
+                    "apps-thunderbird",
+                    "Thunderbird",
+                    "org.mozilla.Thunderbird",
+                    "Mail, calendar and contacts in one Mozilla application.",
+                    [],
+                ),
+            ],
+        ),
+        (
+            "Multimedia",
+            [
+                (
+                    "apps-vlc",
+                    "VLC",
+                    "org.videolan.VLC",
+                    "Plays practically any format without adding system codecs.",
+                    [],
+                ),
+                (
+                    "apps-obs",
+                    "OBS Studio",
+                    "com.obsproject.Studio",
+                    "Screen recording and streaming, with VAAPI and NVENC support.",
+                    [],
+                ),
+                (
+                    "apps-audacity",
+                    "Audacity",
+                    "org.audacityteam.Audacity",
+                    "Audio recording and editing.",
+                    [],
+                ),
+                (
+                    "apps-kdenlive",
+                    "Kdenlive",
+                    "org.kde.kdenlive",
+                    "Non linear video editing.",
+                    [],
+                ),
+                (
+                    "apps-handbrake",
+                    "HandBrake",
+                    "fr.handbrake.ghb",
+                    "Transcodes video between formats, with presets per device.",
+                    [],
+                ),
+                (
+                    "apps-mpv",
+                    "mpv",
+                    "io.mpv.Mpv",
+                    "A minimal, scriptable video player.",
+                    [],
+                ),
+                (
+                    "apps-shotcut",
+                    "Shotcut",
+                    "org.shotcut.Shotcut",
+                    "A lighter video editor than Kdenlive, quicker to learn.",
+                    [],
+                ),
+            ],
+        ),
+        (
             "Music players",
-            "Spotify, YouTube Music and Cider.",
-            ["com.spotify.Client", "app.ytmdesktop.ytmdesktop", "sh.cider.Cider"],
             [
-                "YTMDesktop is a desktop client for YouTube Music.",
-                "Cider is an Apple Music client.",
-                "Spotify and the streaming clients need their accounts to play anything.",
+                (
+                    "apps-spotify",
+                    "Spotify",
+                    "com.spotify.Client",
+                    "The official Spotify client.",
+                    ["Needs a Spotify account to play anything."],
+                ),
+                (
+                    "apps-ytmusic",
+                    "YouTube Music",
+                    "app.ytmdesktop.ytmdesktop",
+                    "YTMDesktop, a desktop client for YouTube Music.",
+                    [],
+                ),
+                (
+                    "apps-cider",
+                    "Cider",
+                    "sh.cider.Cider",
+                    "An Apple Music client.",
+                    ["Needs an Apple Music subscription to play anything."],
+                ),
             ],
         ),
         (
-            "apps-terminals",
-            "Terminals",
-            "Ptyxis, WezTerm and Black Box.",
+            "Office and documents",
             [
-                "app.devsuite.Ptyxis",
-                "org.wezfurlong.wezterm",
-                "com.raggesilver.BlackBox",
+                (
+                    "apps-libreoffice",
+                    "LibreOffice",
+                    "org.libreoffice.LibreOffice",
+                    "The full office suite.",
+                    ["The Flatpak is usually newer than the one in the repository."],
+                ),
+                (
+                    "apps-foliate",
+                    "Foliate",
+                    "com.github.johnfactotum.Foliate",
+                    "An ebook reader for EPUB and MOBI.",
+                    [],
+                ),
+                (
+                    "apps-onlyoffice",
+                    "OnlyOffice",
+                    "org.onlyoffice.desktopeditors",
+                    "The office suite closest to the Microsoft Office file layouts.",
+                    [],
+                ),
+                (
+                    "apps-obsidian",
+                    "Obsidian",
+                    "md.obsidian.Obsidian",
+                    "Markdown notes linked into a local knowledge graph.",
+                    [],
+                ),
+                (
+                    "apps-joplin",
+                    "Joplin",
+                    "net.cozic.joplin_desktop",
+                    "Notes and to do lists with end to end encrypted sync.",
+                    [],
+                ),
+                (
+                    "apps-xournalpp",
+                    "Xournal++",
+                    "com.github.xournalpp.xournalpp",
+                    "Handwritten notes and PDF annotation, made for pen input.",
+                    [],
+                ),
+                (
+                    "apps-zotero",
+                    "Zotero",
+                    "org.zotero.Zotero",
+                    "Collects, organises and cites research sources.",
+                    [],
+                ),
             ],
+        ),
+        (
+            "System tools",
             [
-                "Ptyxis is a GNOME terminal built for containers and host shells.",
-                "WezTerm is GPU-accelerated and configured in Lua.",
-                "A Flatpak terminal reaches the host shell through flatpak-spawn.",
+                (
+                    "apps-missioncenter",
+                    "Mission Center",
+                    "io.missioncenter.MissionCenter",
+                    "Shows CPU, GPU, disk and network load in one window.",
+                    [],
+                ),
+                (
+                    "apps-warehouse",
+                    "Warehouse",
+                    "io.github.flattool.Warehouse",
+                    "Manages installed Flatpaks: leftover data, pins, user overrides.",
+                    [],
+                ),
+                (
+                    "apps-gearlever",
+                    "Gear Lever",
+                    "it.mijorus.gearlever",
+                    "Integrates AppImages into the menu and keeps them updated.",
+                    [],
+                ),
+                (
+                    "apps-bleachbit",
+                    "BleachBit",
+                    "org.bleachbit.BleachBit",
+                    "Finds and clears caches, logs and leftovers per application.",
+                    ["Read what a cleaner will touch before running it; deletions are final."],
+                ),
+                (
+                    "apps-baobab",
+                    "Disk Usage Analyzer",
+                    "org.gnome.baobab",
+                    "Shows which directories eat the disk, as rings or a treemap.",
+                    [],
+                ),
+            ],
+        ),
+        (
+            "Utilities",
+            [
+                (
+                    "apps-bitwarden",
+                    "Bitwarden",
+                    "com.bitwarden.desktop",
+                    "A password manager with a free cloud sync account.",
+                    [],
+                ),
+                (
+                    "apps-keepassxc",
+                    "KeePassXC",
+                    "org.keepassxc.KeePassXC",
+                    "An offline password manager; the database is a local file.",
+                    [],
+                ),
+                (
+                    "apps-flameshot",
+                    "Flameshot",
+                    "org.flameshot.Flameshot",
+                    "Screenshots with on the spot arrows, blur and annotations.",
+                    ["On Wayland it goes through the desktop portal; grant it once."],
+                ),
+                (
+                    "apps-pikabackup",
+                    "Pika Backup",
+                    "org.gnome.World.PikaBackup",
+                    "Scheduled, deduplicated backups built on borg.",
+                    [],
+                ),
+                (
+                    "apps-qbittorrent",
+                    "qBittorrent",
+                    "org.qbittorrent.qBittorrent",
+                    "A BitTorrent client without ads.",
+                    [],
+                ),
+                (
+                    "apps-localsend",
+                    "LocalSend",
+                    "org.localsend.localsend_app",
+                    "AirDrop style file sharing with phones and computers on the LAN.",
+                    [],
+                ),
+            ],
+        ),
+        (
+            "Terminals",
+            [
+                (
+                    "apps-ptyxis",
+                    "Ptyxis",
+                    "app.devsuite.Ptyxis",
+                    "A GNOME terminal built for containers and host shells.",
+                    ["A Flatpak terminal reaches the host shell through flatpak-spawn."],
+                ),
+                (
+                    "apps-wezterm",
+                    "WezTerm",
+                    "org.wezfurlong.wezterm",
+                    "GPU-accelerated, configured in Lua.",
+                    ["A Flatpak terminal reaches the host shell through flatpak-spawn."],
+                ),
+                (
+                    "apps-blackbox",
+                    "Black Box",
+                    "com.raggesilver.BlackBox",
+                    "A GTK4 terminal with themes and tabs.",
+                    ["A Flatpak terminal reaches the host shell through flatpak-spawn."],
+                ),
             ],
         ),
     ]
 
     tasks: list[Task] = []
-    for task_id, title, summary, app_ids, details in groups:
-        first = app_ids[0]
+    for subcategory, apps in groups:
+        for task_id, title, app_id, summary, details in apps:
+            tasks.append(
+                Task(
+                    id=task_id,
+                    title=title,
+                    summary=summary,
+                    category=Category.APPS,
+                    subcategory=subcategory,
+                    risk=Risk.SAFE,
+                    details=[*details, "Source: Flathub.", f"Application id: {app_id}"],
+                    steps=[_flatpak_install([app_id])],
+                    detect=(lambda app: lambda probe, sys_: probe.has_flatpak_app(app))(app_id),
+                )
+            )
+    tasks.append(_helium_task(system))
+    tasks.append(_unisic_task(system))
+    tasks.extend(_desktop_tool_tasks(system))
+    return tasks
+
+
+UNISIC_APPIMAGE = ".local/bin/unisic.AppImage"
+
+_UNISIC_APPIMAGE_SCRIPT = f"""set -euo pipefail
+test "$(uname -m)" = x86_64 || {{ echo "no Unisic build for $(uname -m)" >&2; exit 1; }}
+mkdir -p "$HOME/.local/bin"
+url=$(curl -fsSL https://api.github.com/repos/unisic/unisic/releases/latest \\
+    | grep -o "\\"browser_download_url\\": *\\"[^\\"]*x86_64\\.AppImage\\"" \\
+    | head -n 1 | cut -d '"' -f 4)
+test -n "$url"
+curl -fL --retry 3 -o "$HOME/{UNISIC_APPIMAGE}" "$url"
+chmod +x "$HOME/{UNISIC_APPIMAGE}"
+"""
+
+
+def _unisic_task(system: System) -> Task:
+    """Unisic per family: the developers' COPR on Fedora, else the AppImage."""
+    details = [
+        "Screenshots and screen recording: annotate before the capture, edit after, "
+        "record GIF or video, OCR the text out of a shot.",
+        "Wayland first, through the desktop portals; X11 works as well.",
+    ]
+    if system.family == "rhel":
+        plugins = (
+            ["dnf5-plugins"]
+            if system.package_manager and system.package_manager.name == "dnf5"
+            else ["dnf-plugins-core"]
+        )
+        return Task(
+            id="apps-unisic",
+            title="Unisic",
+            summary="Screenshots and screen recording, from the developers' COPR repository.",
+            category=Category.APPS,
+            subcategory="Utilities",
+            risk=Risk.MEDIUM,
+            details=[
+                *details,
+                "Repository: COPR deandark/Unisic, run by the Unisic developers.",
+                "Updates arrive through dnf together with the rest of the system.",
+            ],
+            steps=[
+                Install(plugins, optional=True),
+                Run(["dnf", "-y", "copr", "enable", "deandark/Unisic"]),
+                Install(["unisic"]),
+            ],
+            detect=lambda probe, sys_: probe.has_package("unisic"),
+        )
+    return Task(
+        id="apps-unisic",
+        title="Unisic",
+        summary="Screenshots and screen recording, as the developers' AppImage.",
+        category=Category.APPS,
+        subcategory="Utilities",
+        risk=Risk.MEDIUM,
+        details=[
+            *details,
+            f"The newest release lands in ~/{UNISIC_APPIMAGE}; the AppImage updates itself.",
+            "Running an AppImage needs FUSE (the fuse2 package on most distributions).",
+            "With Gear Lever installed (System tools), the file is handed over to it "
+            "automatically: menu entry, managed updates.",
+            "x86_64 only; there is no arm build yet.",
+        ],
+        steps=[
+            Install(["curl"], optional=True),
+            Shell(_UNISIC_APPIMAGE_SCRIPT, root=False),
+            _gearlever_integrate(UNISIC_APPIMAGE),
+        ],
+        detect=_appimage_detect("unisic", UNISIC_APPIMAGE),
+    )
+
+
+async def _helium_list_content(ctx: ExecContext) -> str:
+    return (
+        HEADER + f"deb [arch=amd64,arm64 signed-by={HELIUM_KEY}] "
+        "https://pkg.helium.computer/deb stable main\n"
+    )
+
+
+_HELIUM_APPIMAGE_SCRIPT = f"""set -euo pipefail
+case "$(uname -m)" in
+    x86_64) suffix="x86_64" ;;
+    aarch64) suffix="arm64" ;;
+    *) echo "no Helium build for $(uname -m)" >&2; exit 1 ;;
+esac
+mkdir -p "$HOME/.local/bin"
+url=$(curl -fsSL https://api.github.com/repos/imputnet/helium-linux/releases/latest \\
+    | grep -o "\\"browser_download_url\\": *\\"[^\\"]*-$suffix\\.AppImage\\"" \\
+    | head -n 1 | cut -d '"' -f 4)
+test -n "$url"
+curl -fL --retry 3 -o "$HOME/{HELIUM_APPIMAGE}" "$url"
+chmod +x "$HOME/{HELIUM_APPIMAGE}"
+"""
+
+
+GEARLEVER_APP = "it.mijorus.gearlever"
+GEARLEVER_FOLDER = "AppImages"  # the default managed folder, from its gschema
+
+
+def _gearlever_integrate(relative_path: str) -> Step:
+    """Hand a downloaded AppImage to Gear Lever, when Gear Lever is there.
+
+    Integration moves the file into Gear Lever's managed folder, writes the
+    menu entry and lets it watch for updates. Without Gear Lever the AppImage
+    simply stays where it was downloaded.
+    """
+
+    async def action(ctx: ExecContext) -> None:
+        if not ctx.probe.has_flatpak_app(GEARLEVER_APP):
+            ctx.log("Gear Lever is not installed, the AppImage stays a plain file", "skip")
+            return
+        await ctx.run(
+            [
+                "flatpak",
+                "run",
+                GEARLEVER_APP,
+                "--integrate",
+                str(ctx.system.home / relative_path),
+                "--yes",
+                "--replace",
+            ],
+            root=False,
+            allow_fail=True,
+            timeout=300.0,
+        )
+
+    return Custom(
+        "integrates the AppImage with Gear Lever (menu entry, updates) when it is installed",
+        action,
+        root=False,
+    )
+
+
+def _appimage_detect(name: str, relative_path: str) -> Callable[[Probe, System], bool]:
+    """Installed either as the plain download or as a Gear Lever managed file.
+
+    Gear Lever moves an integrated AppImage into ~/AppImages and lowercases
+    the name, so the original path alone would read as "not installed".
+    """
+
+    def detect(probe: Probe, sys_: System) -> bool:
+        if (sys_.home / relative_path).exists():
+            return True
+        folder = sys_.home / GEARLEVER_FOLDER
+        if not folder.is_dir():
+            return False
+        return any(name in path.name.lower() for path in folder.iterdir())
+
+    return detect
+
+
+def _helium_task(system: System) -> Task:
+    """Helium per family: COPR on Fedora, the deb repo on Debian, else AppImage.
+
+    The developers refuse Flatpak on purpose (sandbox concerns), so every
+    branch installs the build they publish themselves.
+    """
+    details = [
+        "Chromium with the Google services stripped out and an ad blocker built in.",
+        "There is no Flatpak: the developers consider the sandbox at odds with a "
+        "browser's own; every branch here installs their own build.",
+    ]
+    if system.family == "rhel":
+        plugins = (
+            ["dnf5-plugins"]
+            if system.package_manager and system.package_manager.name == "dnf5"
+            else ["dnf-plugins-core"]
+        )
+        return Task(
+            id="apps-helium",
+            title="Helium",
+            summary="A privacy first Chromium, from the developers' COPR repository.",
+            category=Category.APPS,
+            subcategory="Browsers",
+            risk=Risk.MEDIUM,
+            details=[
+                *details,
+                "Repository: COPR imput/helium, run by the Helium developers.",
+                "Updates arrive through dnf together with the rest of the system.",
+            ],
+            steps=[
+                Install(plugins, optional=True),
+                Run(["dnf", "-y", "copr", "enable", "imput/helium"]),
+                Install(["helium-bin"]),
+            ],
+            detect=lambda probe, sys_: probe.has_package("helium-bin"),
+        )
+    if system.family == "debian":
+        return Task(
+            id="apps-helium",
+            title="Helium",
+            summary="A privacy first Chromium, from the developers' apt repository.",
+            category=Category.APPS,
+            subcategory="Browsers",
+            risk=Risk.MEDIUM,
+            details=[
+                *details,
+                "Repository: https://pkg.helium.computer/deb, signed with the key "
+                "from the developers' GitHub.",
+                "Updates arrive through apt together with the rest of the system.",
+            ],
+            steps=[
+                Install(["curl", "ca-certificates"], optional=True),
+                Run(["install", "-d", "-m", "0755", "/etc/apt/keyrings"]),
+                Run(["curl", "-fsSL", HELIUM_KEY_URL, "-o", HELIUM_KEY]),
+                Run(["chmod", "0644", HELIUM_KEY]),
+                WriteFile(HELIUM_LIST, _helium_list_content, "the Helium apt source"),
+                Run(["apt-get", "update"]),
+                Run(["apt-get", "install", "-y", "helium-bin"], timeout=1800.0),
+            ],
+            detect=lambda probe, sys_: probe.has_package("helium-bin"),
+        )
+    return Task(
+        id="apps-helium",
+        title="Helium",
+        summary="A privacy first Chromium, as the developers' AppImage.",
+        category=Category.APPS,
+        subcategory="Browsers",
+        risk=Risk.MEDIUM,
+        details=[
+            *details,
+            f"The newest release lands in ~/{HELIUM_APPIMAGE}; run it from there.",
+            "Running an AppImage needs FUSE (the fuse2 package on most distributions).",
+            "With Gear Lever installed (System tools), the file is handed over to it "
+            "automatically: menu entry, managed updates.",
+            "It does not update itself; rerun this task for a new version.",
+        ],
+        steps=[
+            Install(["curl"], optional=True),
+            Shell(_HELIUM_APPIMAGE_SCRIPT, root=False),
+            _gearlever_integrate(HELIUM_APPIMAGE),
+        ],
+        detect=_appimage_detect("helium", HELIUM_APPIMAGE),
+    )
+
+
+def _gnome(system: System) -> bool:
+    return "GNOME" in system.desktop.upper()
+
+
+def _qt_desktop(system: System) -> bool:
+    desktop = system.desktop.upper()
+    return "KDE" in desktop or "LXQT" in desktop
+
+
+def _plain_desktop(system: System) -> bool:
+    """A desktop without its own tweak tool: Xfce, LXDE, a bare window manager."""
+    desktop = system.desktop.upper()
+    return "GNOME" not in desktop and "KDE" not in desktop
+
+
+def _desktop_tool_tasks(system: System) -> list[Task]:
+    """Tweak tools matched to the detected desktop, GNOME Tweaks style."""
+    tasks = [
+        Task(
+            id="apps-gnome-tweaks",
+            title="GNOME Tweaks",
+            summary="The settings GNOME hides: fonts, window buttons, startup applications.",
+            category=Category.APPS,
+            subcategory="Desktop tools",
+            risk=Risk.SAFE,
+            steps=[Install(["gnome-tweaks"])],
+            available=_gnome,
+            detect=lambda probe, sys_: probe.has_package("gnome-tweaks"),
+        ),
+        Task(
+            id="apps-extension-manager",
+            title="Extension Manager",
+            summary="Browses and installs GNOME Shell extensions without a web browser.",
+            category=Category.APPS,
+            subcategory="Desktop tools",
+            risk=Risk.SAFE,
+            details=["Source: Flathub.", "Application id: com.mattjakeman.ExtensionManager"],
+            steps=[_flatpak_install(["com.mattjakeman.ExtensionManager"])],
+            available=_gnome,
+            detect=lambda probe, sys_: probe.has_flatpak_app("com.mattjakeman.ExtensionManager"),
+        ),
+        Task(
+            id="apps-dconf-editor",
+            title="dconf Editor",
+            summary="Raw access to every GNOME and GTK setting, including the undocumented ones.",
+            category=Category.APPS,
+            subcategory="Desktop tools",
+            risk=Risk.SAFE,
+            details=["Changing keys blindly can misconfigure applications; it warns on write."],
+            steps=[Install(["dconf-editor"])],
+            available=_gnome,
+            detect=lambda probe, sys_: probe.has_package("dconf-editor"),
+        ),
+        Task(
+            id="apps-lxappearance",
+            title="LXAppearance",
+            summary="GTK theme, icon and font switcher for desktops without one.",
+            category=Category.APPS,
+            subcategory="Desktop tools",
+            risk=Risk.SAFE,
+            details=["The standard way to theme GTK applications under Xfce, LXDE or a bare WM."],
+            steps=[Install(["lxappearance"])],
+            available=_plain_desktop,
+            detect=lambda probe, sys_: probe.has_package("lxappearance"),
+        ),
+    ]
+    kvantum = by_family(
+        system,
+        rhel=["kvantum"],
+        arch=["kvantum"],
+        debian=["qt5-style-kvantum"],
+        suse=["kvantum-qt5"],
+    )
+    if kvantum:
         tasks.append(
             Task(
-                id=task_id,
-                title=title,
-                summary=summary,
+                id="apps-kvantum",
+                title="Kvantum",
+                summary="A theme engine for Qt applications, with its own theme manager.",
                 category=Category.APPS,
+                subcategory="Desktop tools",
                 risk=Risk.SAFE,
-                details=[*details, "Source: Flathub.", "Applications: " + ", ".join(app_ids)],
-                steps=[_flatpak_install(app_ids)],
-                detect=(lambda app: lambda probe, sys_: probe.has_flatpak_app(app))(first),
+                details=[
+                    "Themes KDE, LXQt and other Qt applications beyond what System "
+                    "Settings offers.",
+                ],
+                steps=[Install(kvantum)],
+                available=_qt_desktop,
+                detect=(
+                    lambda names: lambda probe, sys_: probe.has_any_package(*names)
+                )(kvantum),
+            )
+        )
+    if system.family != "arch":
+        # On Arch nitrogen lives in the AUR, which the package manager
+        # cannot reach on its own.
+        tasks.append(
+            Task(
+                id="apps-nitrogen",
+                title="Nitrogen",
+                summary="A wallpaper setter for window managers without a desktop.",
+                category=Category.APPS,
+                subcategory="Desktop tools",
+                risk=Risk.SAFE,
+                details=["X11 only; on Wayland the compositor sets the wallpaper."],
+                steps=[Install(["nitrogen"])],
+                available=_plain_desktop,
+                detect=lambda probe, sys_: probe.has_package("nitrogen"),
             )
         )
     return tasks
@@ -1147,10 +1910,7 @@ def _maintenance_tasks(system: System) -> list[Task]:
         steps.append(Run([pm.binary, *pm.clean], allow_fail=True))
     steps.append(Run(["journalctl", "--vacuum-size=500M"], allow_fail=True))
     steps.append(
-        Run(
-            ["flatpak", "uninstall", "--system", "--unused", "-y", "--noninteractive"],
-            allow_fail=True,
-        )
+        Run(["find", "/var/lib/systemd/coredump", "-type", "f", "-delete"], allow_fail=True)
     )
 
     return [
@@ -1163,9 +1923,47 @@ def _maintenance_tasks(system: System) -> list[Task]:
             details=[
                 "Removes packages installed as dependencies that nothing needs any more.",
                 "Clears downloaded packages and trims the systemd journal to 500 MiB.",
-                "Removes unused Flatpak runtimes.",
+                "Deletes stored crash dumps from /var/lib/systemd/coredump.",
             ],
             steps=steps,
+        ),
+        Task(
+            id="maint-flatpak",
+            title="Flatpak maintenance: update, unused runtimes, repair",
+            summary="Updates every Flatpak, drops what nothing uses and verifies the store.",
+            category=Category.MAINTENANCE,
+            risk=Risk.SAFE,
+            details=[
+                "flatpak update brings every application and runtime up to date.",
+                "flatpak uninstall --unused removes runtimes no application needs any more.",
+                "flatpak repair checks the local store for damage; on a large "
+                "installation it can take a few minutes.",
+            ],
+            steps=[
+                Run(
+                    ["flatpak", "update", "-y", "--noninteractive"],
+                    allow_fail=True,
+                    timeout=3600.0,
+                ),
+                Run(
+                    ["flatpak", "uninstall", "--system", "--unused", "-y", "--noninteractive"],
+                    allow_fail=True,
+                ),
+                Run(["flatpak", "repair", "--system"], allow_fail=True, timeout=3600.0),
+            ],
+            available=lambda sys_: sys_.has("flatpak"),
+        ),
+        Task(
+            id="maint-thumbnails",
+            title="Thumbnail cache",
+            summary="Clears the file manager thumbnail cache in ~/.cache/thumbnails.",
+            category=Category.MAINTENANCE,
+            risk=Risk.SAFE,
+            details=[
+                "Thumbnails are rebuilt on demand the next time a directory is opened.",
+                "After years of use this cache commonly holds hundreds of megabytes.",
+            ],
+            steps=[Shell("rm -rf ~/.cache/thumbnails/*", root=False, allow_fail=True)],
         ),
     ]
 

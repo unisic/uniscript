@@ -46,7 +46,11 @@ def build_tasks(system: System) -> list[Task]:
     tasks.extend(common.build(system))
 
     available = [task for task in tasks if task.is_available(system)]
-    available.sort(key=lambda task: (task.category.order, task.title))
+    # Tasks without a subcategory come first, then the subcategories in
+    # alphabetical order, so a category reads as: loose tasks, then groups.
+    available.sort(
+        key=lambda task: (task.category.order, task.subcategory or "", task.title.lower())
+    )
 
     seen: set[str] = set()
     unique: list[Task] = []
@@ -61,3 +65,14 @@ def build_tasks(system: System) -> list[Task]:
 def categories_of(tasks: list[Task]) -> list[Category]:
     present = {task.category for task in tasks}
     return sorted(present, key=lambda category: category.order)
+
+
+def quick_setup_ids(tasks: list[Task]) -> list[str]:
+    """The post-install baseline: the recommended set plus the driver tasks.
+
+    Tasks are already filtered to this machine, so the NVIDIA driver is in
+    the list exactly when an NVIDIA card was detected.
+    """
+    return [
+        task.id for task in tasks if task.default or task.category is Category.DRIVERS
+    ]

@@ -302,6 +302,7 @@ class Task:
     category: Category
     steps: list[Step]
     risk: Risk = Risk.SAFE
+    subcategory: str | None = None
     details: list[str] = field(default_factory=list)
     tags: frozenset[str] = frozenset()
     default: bool = False
