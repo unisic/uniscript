@@ -471,36 +471,44 @@ class UniscriptApp(App[None]):
 
         lines = [f"[b]{escape(task.title)}[/]", ""]
         applied = self._applied.get(task.id)
-        badges = [f"[$text-muted]risk:[/] {task.risk.label}"]
-        if applied is True:
-            badges.append("[$text-success]already applied[/]")
-        elif applied is False:
-            badges.append("[$text-muted]not applied[/]")
+        # The same glyphs and colours the list uses, so the flag on a row and
+        # the badge in its description read as one thing.
+        if task.risk is Risk.HIGH:
+            badges = ["[b $text-error]▲ risky[/]"]
+        elif task.risk is Risk.MEDIUM:
+            badges = ["[$text-warning]● needs care[/]"]
+        else:
+            badges = ["[$text-muted]safe[/]"]
         if task.reboot:
             badges.append("[$text-warning]needs a reboot[/]")
+        if applied is True:
+            badges.append("[$text-success]✓ already applied[/]")
         if task.default:
-            badges.append("[$text-muted]in the essentials set[/]")
+            badges.append("[$text-muted]essentials[/]")
         if "gaming" in task.tags:
-            badges.append("[$text-muted]in the gaming set[/]")
-        lines.append("   ".join(badges))
+            badges.append("[$text-muted]gaming[/]")
+        lines.append("[$text-muted]  ·  [/]".join(badges))
         lines.append("")
         lines.append(escape(task.summary))
 
         if task.warning:
             lines.append("")
-            lines.append(f"[$text-warning]Warning:[/] {escape(task.warning)}")
+            lines.append("[b $text-warning]▲ Warning[/]")
+            lines.append(escape(task.warning))
 
         if task.details:
             lines.append("")
             for detail in task.details:
-                lines.append(f"  [$text-accent]-[/] {escape(detail)}")
+                lines.append(f"  [$text-accent]•[/] {escape(detail)}")
 
         commands = task.preview(self.system)
         if commands:
             lines.append("")
             lines.append("[b]What will be done[/]")
+            # Not every preview line is a shell command (some are notes or
+            # file writes), so the marker is a neutral arrow rather than $.
             for command in commands:
-                lines.append(f"  [$text-muted]{escape(command)}[/]")
+                lines.append(f"  [$text-muted]›[/] {escape(command)}")
 
         target.update("\n".join(lines))
 
