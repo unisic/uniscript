@@ -1074,6 +1074,47 @@ def _app_tasks(system: System) -> list[Task]:
             ["com.discordapp.Discord", "org.signal.Signal", "org.telegram.desktop"],
             ["All as Flatpaks, updated independently of the system."],
         ),
+        (
+            "apps-browsers",
+            "Browsers",
+            "Brave, Chromium and LibreWolf.",
+            [
+                "com.brave.Browser",
+                "org.chromium.Chromium",
+                "io.gitlab.librewolf-community",
+            ],
+            [
+                "Brave is Chromium with an ad blocker built in.",
+                "Chromium is the plain upstream browser without Google's additions.",
+                "LibreWolf is Firefox with the telemetry stripped out.",
+            ],
+        ),
+        (
+            "apps-music",
+            "Music players",
+            "Spotify, YouTube Music and Cider.",
+            ["com.spotify.Client", "app.ytmdesktop.ytmdesktop", "sh.cider.Cider"],
+            [
+                "YTMDesktop is a desktop client for YouTube Music.",
+                "Cider is an Apple Music client.",
+                "Spotify and the streaming clients need their accounts to play anything.",
+            ],
+        ),
+        (
+            "apps-terminals",
+            "Terminals",
+            "Ptyxis, WezTerm and Black Box.",
+            [
+                "app.devsuite.Ptyxis",
+                "org.wezfurlong.wezterm",
+                "com.raggesilver.BlackBox",
+            ],
+            [
+                "Ptyxis is a GNOME terminal built for containers and host shells.",
+                "WezTerm is GPU-accelerated and configured in Lua.",
+                "A Flatpak terminal reaches the host shell through flatpak-spawn.",
+            ],
+        ),
     ]
 
     tasks: list[Task] = []

@@ -136,13 +136,13 @@ security).
 
 ## What is in the task catalogue
 
-77 tasks. Only the ones matching the detected system and hardware are shown. On
-the test machine (NVIDIA, KDE, Btrfs, desktop) that is 44 tasks on Fedora, 40 on
-Ubuntu, 39 on Arch and 34 on openSUSE.
+80 tasks. Only the ones matching the detected system and hardware are shown. On
+the test machine (NVIDIA, KDE, Btrfs, desktop) that is 47 tasks on Fedora, 43 on
+Ubuntu, 42 on Arch and 37 on openSUSE.
 
 | Where | Tasks | What they cover |
 | --- | --- | --- |
-| all families | 31 | Flatpak and Flathub, application sets, snapd, the gaming stack (Heroic, Bottles, ProtonUp-Qt, MangoHud, kernel limits), kernel and IO tuning, zram, journal cap, TRIM, encrypted DNS, firewall, power profiles, cache cleanup, zsh, fish, bash and starship |
+| all families | 34 | Flatpak and Flathub, application sets (multimedia, office, system tools, messengers, browsers, terminals, music players), snapd, the gaming stack (Heroic, Bottles, ProtonUp-Qt, MangoHud, kernel limits), kernel and IO tuning, zram, journal cap, TRIM, encrypted DNS, firewall, power profiles, cache cleanup, zsh, fish, bash and starship |
 | Fedora, RHEL | 18 | RPM Fusion free, nonfree and tainted, openh264, COPR, Terra, faster dnf, codecs, the NVIDIA driver, AMD and Intel video decoding, Btrfs snapshots, fwupd, old kernels |
 | Debian, Ubuntu, Mint | 11 | universe and multiverse, Debian components, Microsoft codecs and fonts, Firefox from Mozilla instead of the snap, drivers, earlyoom, apt tuning |
 | Arch and derivatives | 11 | mirror list, an AUR helper (paru or yay), multilib, codecs, drivers, pacman tuning, a package cache cap |
