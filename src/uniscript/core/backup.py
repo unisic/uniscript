@@ -126,3 +126,53 @@ class BackupStore:
         if not self.entries:
             return "no backups in this session"
         return f"{len(self.entries)} files in {self.root}"
+
+
+@dataclass(frozen=True)
+class RestoreSession:
+    """A past session whose file changes can be reverted with its restore.sh."""
+
+    name: str
+    label: str
+    path: Path
+    script: Path
+    files: list[str]
+    # Whether restoring needs sudo; True when the manifest cannot be read.
+    needs_root: bool = True
+
+
+def session_label(name: str) -> str:
+    try:
+        return datetime.strptime(name, "%Y%m%d-%H%M%S").strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return name
+
+
+def list_restore_sessions(backups_root: Path) -> list[RestoreSession]:
+    """Every session with a restore script, newest first.
+
+    Sessions that changed no files write nothing to disk and therefore never
+    show up here; a broken manifest still yields the session, just without
+    the file list.
+    """
+    if not backups_root.is_dir():
+        return []
+    sessions: list[RestoreSession] = []
+    for entry in sorted(backups_root.iterdir(), reverse=True):
+        script = entry / "restore.sh"
+        if not entry.is_dir() or not script.is_file():
+            continue
+        files: list[str] = []
+        needs_root = True
+        try:
+            manifest = json.loads((entry / "manifest.json").read_text(encoding="utf-8"))
+            files = list(dict.fromkeys(item["original"] for item in manifest))
+            needs_root = any(item.get("root", True) for item in manifest)
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        sessions.append(
+            RestoreSession(
+                entry.name, session_label(entry.name), entry, script, files, needs_root
+            )
+        )
+    return sessions
