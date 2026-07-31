@@ -12,7 +12,7 @@ from pathlib import Path
 
 from . import __version__
 from .catalog import build_tasks
-from .core.backup import BackupStore
+from .core.backup import BackupStore, list_restore_sessions
 from .core.context import ExecContext
 from .core.privileges import PrivilegeManager
 from .core.probe import Probe
@@ -57,6 +57,18 @@ def _parser() -> argparse.ArgumentParser:
         "--run",
         metavar="ID[,ID...]",
         help="run the selected tasks without the interface",
+    )
+    parser.add_argument(
+        "--remove",
+        metavar="ID[,ID...]",
+        help="uninstall the selected applications without the interface",
+    )
+    parser.add_argument(
+        "--restore",
+        nargs="?",
+        const="list",
+        metavar="SESSION",
+        help="list the backup sessions, or revert the file changes of one",
     )
     parser.add_argument(
         "--input",
@@ -253,7 +265,7 @@ async def _run_headless(
     system: System,
     probe: Probe,
     privileges: PrivilegeManager,
-    tasks: list[Task],
+    jobs: list[tuple[Task, bool]],
     inputs: dict[str, str],
     dry_run: bool,
 ) -> int:
@@ -278,7 +290,10 @@ async def _run_headless(
         interactive=interactive,
     )
 
-    needs_root = any(task.requires_root() for task in tasks)
+    needs_root = any(
+        task.undo_requires_root() if uninstall else task.requires_root()
+        for task, uninstall in jobs
+    )
     if (
         needs_root
         and not dry_run
@@ -292,10 +307,14 @@ async def _run_headless(
 
     failures = 0
     try:
-        for index, task in enumerate(tasks, start=1):
-            print(f"\n[{index}/{len(tasks)}] {task.title}", flush=True)
+        for index, (task, uninstall) in enumerate(jobs, start=1):
+            title = f"Uninstall {task.title}" if uninstall else task.title
+            print(f"\n[{index}/{len(jobs)}] {title}", flush=True)
             try:
-                await task.run(ctx)
+                if uninstall:
+                    await task.run_undo(ctx)
+                else:
+                    await task.run(ctx)
             except CommandFailed as exc:
                 failures += 1
                 print(f"! error: {exc}", file=sys.stderr, flush=True)
@@ -316,11 +335,39 @@ async def _run_headless(
     return 1 if failures else 0
 
 
+def _restore(selector: str, yes: bool) -> int:
+    sessions = list_restore_sessions(data_dir() / "backups")
+    if not sessions:
+        print("No backup sessions to restore from yet.")
+        return 1
+    if selector == "list":
+        print("Backup sessions, newest first:")
+        for session in sessions:
+            print(f"  {session.name}  ({session.label}, {len(session.files)} files)")
+        print("\nRevert one with: uniscript --restore SESSION")
+        return 0
+    session = next((item for item in sessions if item.name == selector), None)
+    if session is None:
+        print(f"unknown backup session: {selector}", file=sys.stderr)
+        return 1
+    print(f"Restoring the files of session {session.label}:")
+    for path in session.files:
+        print(f"  {path}")
+    if not yes:
+        answer = input("Continue? [y/N] ").strip().lower()
+        if answer not in {"y", "yes"}:
+            return 1
+    return subprocess.call(["bash", str(session.script)])
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
 
     if args.input_probe:
         return _input_probe()
+
+    if args.restore:
+        return _restore(args.restore, args.yes)
 
     system = detect_system()
     probe = Probe(system)
@@ -341,11 +388,16 @@ def main(argv: list[str] | None = None) -> int:
         _print_plan(system, chosen)
         return 1 if missing else 0
 
-    if args.run:
-        chosen, missing = _select(tasks, args.run)
-        for item in missing:
+    if args.run or args.remove:
+        chosen, missing = _select(tasks, args.run) if args.run else ([], [])
+        removals, missing_removals = _select(tasks, args.remove) if args.remove else ([], [])
+        for item in missing + missing_removals:
             print(f"unknown task: {item}", file=sys.stderr)
-        if not chosen:
+        not_removable = [task.id for task in removals if not task.removable]
+        for task_id in not_removable:
+            print(f"task {task_id} cannot be uninstalled from here", file=sys.stderr)
+        removals = [task for task in removals if task.removable]
+        if not chosen and not removals:
             return 1
         inputs: dict[str, str] = {}
         for pair in args.input:
@@ -372,11 +424,14 @@ def main(argv: list[str] | None = None) -> int:
             print("The following tasks will run:")
             for task in chosen:
                 print(f"  - {task.title}")
+            for task in removals:
+                print(f"  - Uninstall {task.title}")
             answer = input("Continue? [y/N] ").strip().lower()
             if answer not in {"y", "yes"}:
                 return 1
+        jobs = [(task, False) for task in chosen] + [(task, True) for task in removals]
         privileges = PrivilegeManager(system)
-        return asyncio.run(_run_headless(system, probe, privileges, chosen, inputs, args.dry_run))
+        return asyncio.run(_run_headless(system, probe, privileges, jobs, inputs, args.dry_run))
 
     interface = "gui" if args.gui else "tui" if args.tui else _ask_interface()
     if interface == "gui":
